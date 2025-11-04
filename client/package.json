@@ -23,5 +23,13 @@
 		"tailwindcss": "^4.1.14",
 		"typescript": "^5.9.3",
 		"vite": "^7.1.10"
+	},
+	"dependencies": {
+		"@levirs565/srp": "^0.3.1",
+		"@smithy/util-base64": "^4.3.0",
+		"@smithy/util-hex-encoding": "^4.2.0",
+		"axios": "^1.13.1",
+		"blakejs": "^1.2.1",
+		"secure-remote-password": "^0.3.1"
 	}
 }
