@@ -19,6 +19,7 @@ pub enum AppError {
     UserNotFound,
     SRPNotStarted,
     InvalidCredential,
+    Forbidden
 }
 
 #[derive(Serialize)]
@@ -38,6 +39,7 @@ impl ResponseError for AppError {
             AppError::NotFound => StatusCode::NOT_FOUND,
             AppError::Internal => StatusCode::INTERNAL_SERVER_ERROR,
             AppError::InvalidCredential => StatusCode::UNAUTHORIZED,
+            AppError::Forbidden => StatusCode::FORBIDDEN,
             _ => StatusCode::BAD_REQUEST,
         }
     }
@@ -59,19 +61,27 @@ impl ResponseError for AppError {
     }
 }
 
-pub struct AppResult<T>(pub Result<T, AppError>);
+pub type AppResult<T> = Result<T, AppError>;
+pub struct AppResponse<T>(pub Result<T, AppError>);
 
-impl<T> AppResult<T> {
-    pub fn ok(value: T) -> Self {
-        AppResult(Ok(value))
+impl<T> AppResponse<T> {
+    pub fn wrap<F>(f: F) -> Self
+    where
+        F: FnOnce() -> Result<T, AppError>,
+    {
+        AppResponse(f())
     }
 
-    pub fn err(error: AppError) -> Self {
-        AppResult(Err(error))
+    pub async fn wrap_async<F, Fut>(f: F) -> Self
+    where
+        F: FnOnce() -> Fut,
+        Fut: std::future::Future<Output = Result<T, AppError>>,
+    {
+        AppResponse(f().await)
     }
 }
 
-impl<T> Responder for AppResult<T>
+impl<T> Responder for AppResponse<T>
 where
     T: Serialize,
 {

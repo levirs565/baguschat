@@ -141,9 +141,15 @@ async function login(username: string, password: string) {
     clientSession,
     toHex(fromBase64(authResponse.srp_evidence))
   )
+  return true
+}
+
+async function logout() {
+  return post("/auth/logout", null);
 }
 
 globalThis.API = {
   signup,
   login,
+  logout
 }
