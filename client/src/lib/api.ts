@@ -1,6 +1,6 @@
 import { createSRPClient } from "@levirs565/srp";
 import blake from "blakejs";
-import axios from "axios";
+import axios, { type AxiosResponseHeaders } from "axios";
 import { fromHex, toHex } from "@smithy/util-hex-encoding";
 import { fromBase64, toBase64 } from "@smithy/util-base64";
 
@@ -21,6 +21,29 @@ const instance = axios.create({
   baseURL: API_URL,
   withCredentials: true
 });
+
+
+async function post(path: string, data: any) {
+  try {
+    const response = await instance.post(path, data);
+
+    if (response.data.error) {
+      throw response.data.error;
+    }
+
+    return response.data;
+  } catch (e: any) {
+    if (axios.isAxiosError(e)) {
+      if (e.response) {
+        throw e.response.data.error
+      } else {
+        throw {type:"NetworkError", error: e}
+      }
+    } else {
+        throw {type:"Unknown", error: e}
+    }
+  }
+}
 
 async function signup(username: string, password: string) {
   const keyPair = await crypto.subtle.generateKey(
@@ -78,7 +101,7 @@ async function signup(username: string, password: string) {
   const srpVerifier = await srpClient.deriveVerifier(srpPrivateKey);
   console.log(srpSalt)
 
-  return instance.post("/signup", {
+  return instance.post("/auth/signup", {
     username,
     srp_salt: toBase64(fromHex(srpSalt)),
     srp_verifier: toBase64(fromHex(srpVerifier)),
@@ -90,16 +113,16 @@ async function signup(username: string, password: string) {
 async function login(username: string, password: string) {
   const clientKey = srpClient.generateEphemeral();
 
-  const halloResponse = await instance.post("/hello", {
+  const halloResponse = await post("/auth/hello", {
     username,
     srp_client_public_key: toBase64(fromHex(clientKey.public)),
   });
 
-  const salt = toHex(fromBase64(halloResponse.data.srp_salt));
+  const salt = toHex(fromBase64(halloResponse.srp_salt));
   const serverPublicKey = toHex(
-    fromBase64(halloResponse.data.srp_server_public_key as string)
+    fromBase64(halloResponse.srp_server_public_key as string)
   );
-  console.log(salt)
+
   const privateKey = await srpClient.derivePrivateKey(salt, username, password);
   const clientSession = await srpClient.deriveSession(
     clientKey.secret,
@@ -108,19 +131,15 @@ async function login(username: string, password: string) {
     username,
     privateKey
   );
-  console.log(clientSession.proof)
-  const authResponse = await instance.post("/auth", {
+  
+  const authResponse = await post("/auth/auth", {
     srp_evidence: toBase64(fromHex(clientSession.proof)),
   });
-
-  if (authResponse.data.error) {
-    console.log(authResponse.data.error)
-  }
 
   await srpClient.verifySession(
     clientKey.public,
     clientSession,
-    toHex(fromBase64(authResponse.data.srp_evidence))
+    toHex(fromBase64(authResponse.srp_evidence))
   )
 }
 
