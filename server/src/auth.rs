@@ -2,7 +2,7 @@ use crate::core::{AppError, AppResponse, AppResult, AppState};
 use crate::utils::base64_field;
 use actix_session::Session;
 use actix_web::Scope;
-use actix_web::{post, web};
+use actix_web::{get, post, web};
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
 use sha2::Sha256;
@@ -217,21 +217,51 @@ async fn srp_auth(
 }
 
 #[post("logout")]
-async fn logout(
-    session: Session
-) -> AppResponse<ActionResult> {
+async fn logout(session: Session) -> AppResponse<ActionResult> {
     AppResponse::wrap_async(|| async {
         guard_auth(&session, true)?;
 
         session.clear();
         Ok(ActionResult::success())
-    }).await
+    })
+    .await
+}
+
+#[derive(Serialize)]
+struct GetStateResponseUser {
+    username: String,
+}
+
+#[derive(Serialize)]
+struct GetStateResponse {
+    user: Option<GetStateResponseUser>,
+}
+
+#[get("state")]
+async fn get_state(session: Session, data: web::Data<AppState>) -> AppResponse<GetStateResponse> {
+    AppResponse::wrap_async(|| async {
+        match get_userid(&session) {
+            None => Ok(GetStateResponse { user: None }),
+            Some(user_id) => {
+                let data = sqlx::query!("SELECT username FROM Users WHERE id = $1", user_id)
+                    .fetch_one(&data.db_pool)
+                    .await
+                    .map_err(|_| AppError::Internal)?;
+                return Ok(GetStateResponse {
+                    user: Some(GetStateResponseUser {
+                        username: data.username,
+                    }),
+                });
+            }
+        }
+    })
+    .await
 }
 
 pub fn get_userid(session: &Session) -> Option<Uuid> {
     match session.get::<Uuid>(USER_SESSION_KEY) {
         Ok(option) => option,
-        Err(e) => None,
+        Err(_) => None,
     }
 }
 
@@ -249,4 +279,5 @@ pub fn scope() -> Scope {
         .service(srp_hello)
         .service(srp_auth)
         .service(logout)
+        .service(get_state)
 }

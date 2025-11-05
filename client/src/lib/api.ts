@@ -1,6 +1,6 @@
 import { createSRPClient } from "@levirs565/srp";
 import blake from "blakejs";
-import axios, { type AxiosResponseHeaders } from "axios";
+import axios, { type AxiosResponse, type AxiosResponseHeaders } from "axios";
 import { fromHex, toHex } from "@smithy/util-hex-encoding";
 import { fromBase64, toBase64 } from "@smithy/util-base64";
 
@@ -22,10 +22,9 @@ const instance = axios.create({
   withCredentials: true
 });
 
-
-async function post(path: string, data: any) {
+async function runRequest(runner: () => Promise<AxiosResponse>) {
   try {
-    const response = await instance.post(path, data);
+    const response = await runner();
 
     if (response.data.error) {
       throw response.data.error;
@@ -44,6 +43,9 @@ async function post(path: string, data: any) {
     }
   }
 }
+
+const get = (path: string) => runRequest(() => instance.get(path))
+const post = (path: string, data: any) => runRequest(() => instance.post(path, data))
 
 async function signup(username: string, password: string) {
   const keyPair = await crypto.subtle.generateKey(
@@ -148,8 +150,13 @@ async function logout() {
   return post("/auth/logout", null);
 }
 
-globalThis.API = {
+async function getState() {
+  return get("/auth/state");
+}
+
+(globalThis as any).API = {
   signup,
   login,
-  logout
+  logout,
+  getState
 }
