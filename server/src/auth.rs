@@ -1,4 +1,4 @@
-use crate::core::{AppError, AppResponse, AppResult, AppState};
+use crate::core::{ActionResult, AppError, AppResponse, AppResult, AppState};
 use crate::utils::base64_field;
 use actix_session::Session;
 use actix_web::Scope;
@@ -22,17 +22,6 @@ struct SignupRequest {
     private_key_encrypted: Vec<u8>,
     #[serde(with = "base64_field")]
     public_key: Vec<u8>,
-}
-
-#[derive(Serialize)]
-struct ActionResult {
-    success: bool,
-}
-
-impl ActionResult {
-    fn success() -> Self {
-        return ActionResult { success: true };
-    }
 }
 
 impl<T> From<AppError> for AppResponse<T> {

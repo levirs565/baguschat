@@ -4,8 +4,10 @@ use actix_web::{HttpRequest, HttpResponse, Responder, ResponseError, body::BoxBo
 use serde::Serialize;
 use sqlx::{Pool, Postgres};
 
+pub type DBPool = Pool<Postgres>;
+
 pub struct AppState {
-    pub db_pool: Pool<Postgres>,
+    pub db_pool: DBPool,
 }
 
 
@@ -126,4 +128,15 @@ pub fn global_error_handler<B>(
         .map_into_right_body();
 
     Ok(ErrorHandlerResponse::Response(res))
+}
+
+#[derive(Serialize)]
+pub struct ActionResult {
+    success: bool,
+}
+
+impl ActionResult {
+    pub fn success() -> Self {
+        return ActionResult { success: true };
+    }
 }

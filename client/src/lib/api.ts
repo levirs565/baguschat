@@ -3,23 +3,31 @@ import blake from "blakejs";
 import axios, { type AxiosResponse, type AxiosResponseHeaders } from "axios";
 import { fromHex, toHex } from "@smithy/util-hex-encoding";
 import { fromBase64, toBase64 } from "@smithy/util-base64";
+import {
+  encryptAESGCM,
+  encryptAESGCMPassword,
+  encryptRSA,
+  exportRawKey,
+  exportRSAPrivateKey,
+  exportRSAPublicKey,
+  generateRSAKeyPair,
+  importRSAPublicKey,
+  generateAESGCMKey,
+  typedArrayToBuffer,
+  importRSAPrivateKey,
+  decryptAESGCMPassword,
+  decryptRSA,
+  importAESGCMKey,
+  decryptAESGCM,
+} from "./crypto";
+import { getUserPrivateKey, saveUserPrivateKey } from "./db";
 
-function typedArrayToBuffer(array: Uint8Array): ArrayBuffer {
-  return array.buffer.slice(
-    array.byteOffset,
-    array.byteLength + array.byteOffset
-  ) as ArrayBuffer;
-}
-
-const srpClient = createSRPClient(
-  "SHA-256",
-  2048
-);
+const srpClient = createSRPClient("SHA-256", 2048);
 
 const API_URL = "http://localhost:8080";
 const instance = axios.create({
   baseURL: API_URL,
-  withCredentials: true
+  withCredentials: true,
 });
 
 async function runRequest(runner: () => Promise<AxiosResponse>) {
@@ -34,65 +42,26 @@ async function runRequest(runner: () => Promise<AxiosResponse>) {
   } catch (e: any) {
     if (axios.isAxiosError(e)) {
       if (e.response) {
-        throw e.response.data.error
+        throw e.response.data.error;
       } else {
-        throw {type:"NetworkError", error: e}
+        throw { type: "NetworkError", error: e };
       }
     } else {
-        throw {type:"Unknown", error: e}
+      throw { type: "Unknown", error: e };
     }
   }
 }
 
-const get = (path: string) => runRequest(() => instance.get(path))
-const post = (path: string, data: any) => runRequest(() => instance.post(path, data))
+const get = (path: string) => runRequest(() => instance.get(path));
+const post = (path: string, data: any) =>
+  runRequest(() => instance.post(path, data));
 
 async function signup(username: string, password: string) {
-  const keyPair = await crypto.subtle.generateKey(
-    {
-      name: "RSA-OAEP",
-      modulusLength: 2048,
-      publicExponent: new Uint8Array([1, 0, 1]),
-      hash: "SHA-256",
-    },
-    true,
-    ["encrypt", "decrypt"]
-  );
+  const keyPair = await generateRSAKeyPair();
+  const privateKey = await exportRSAPrivateKey(keyPair.privateKey);
+  const publicKey = await exportRSAPublicKey(keyPair.publicKey);
 
-  const pkcs8 = await crypto.subtle.exportKey("pkcs8", keyPair.privateKey);
-  const spki = await crypto.subtle.exportKey("spki", keyPair.publicKey);
-  const salt = crypto.getRandomValues(new Uint8Array(16));
-  const iv = crypto.getRandomValues(new Uint8Array(12));
-
-  const passwordKey = await crypto.subtle.importKey(
-    "raw",
-    new TextEncoder().encode(password),
-    "PBKDF2",
-    false,
-    ["deriveKey"]
-  );
-
-  const aesKey = await crypto.subtle.deriveKey(
-    {
-      name: "PBKDF2",
-      salt: salt,
-      iterations: 100000,
-      hash: "SHA-256",
-    },
-    passwordKey,
-    { name: "AES-GCM", length: 256 },
-    false,
-    ["encrypt"]
-  );
-
-  const privateKeyEncrypted = await crypto.subtle.encrypt(
-    {
-      name: "AES-GCM",
-      iv: iv,
-    },
-    aesKey,
-    pkcs8
-  );
+  const privateKeyEncrypted = await encryptAESGCMPassword(password, privateKey);
 
   const srpSalt = srpClient.generateSalt();
   const srpPrivateKey = await srpClient.derivePrivateKey(
@@ -101,14 +70,13 @@ async function signup(username: string, password: string) {
     password
   );
   const srpVerifier = await srpClient.deriveVerifier(srpPrivateKey);
-  console.log(srpSalt)
 
   return instance.post("/auth/signup", {
     username,
     srp_salt: toBase64(fromHex(srpSalt)),
     srp_verifier: toBase64(fromHex(srpVerifier)),
     private_key_encrypted: toBase64(new Uint8Array(privateKeyEncrypted)),
-    public_key: toBase64(new Uint8Array(spki)),
+    public_key: toBase64(new Uint8Array(publicKey)),
   });
 }
 
@@ -133,7 +101,7 @@ async function login(username: string, password: string) {
     username,
     privateKey
   );
-  
+
   const authResponse = await post("/auth/auth", {
     srp_evidence: toBase64(fromHex(clientSession.proof)),
   });
@@ -142,8 +110,20 @@ async function login(username: string, password: string) {
     clientKey.public,
     clientSession,
     toHex(fromBase64(authResponse.srp_evidence))
-  )
-  return true
+  );
+
+  const rsaPrivateKeyRawEncrypted = fromBase64(
+    (await getKeys()).private_key_encrypted
+  );
+  const rsaPrivateKeyRaw = await decryptAESGCMPassword(
+    password,
+    rsaPrivateKeyRawEncrypted
+  );
+  const rsaPrivateKey = await importRSAPrivateKey(rsaPrivateKeyRaw);
+
+  await saveUserPrivateKey(rsaPrivateKey);
+
+  return true;
 }
 
 async function logout() {
@@ -155,11 +135,90 @@ async function getState() {
 }
 
 async function getKeys() {
-  return get("/auth/keys")
+  return get("/auth/keys");
 }
 
 async function getUser(id: string) {
-  return get(`/user/${id}`)
+  return get(`/user/${id}`);
+}
+
+async function encryptKeyForUser(userid: string, keyBuffer: ArrayBuffer) {
+  const publicKeyRaw = typedArrayToBuffer(
+    fromBase64((await getUser(userid)).public_key)
+  );
+  return encryptRSA(await importRSAPublicKey(publicKeyRaw), keyBuffer);
+}
+
+async function getUserId() {
+  return (await getState()).user.id;
+}
+
+async function getChatData(receiverId: string, message: string) {
+  const messageKey = await generateAESGCMKey();
+  const keyBuffer = await exportRawKey(messageKey);
+  return {
+    receiver_id: receiverId,
+    message_cipher: toBase64(
+      await encryptAESGCM(messageKey, new TextEncoder().encode(message))
+    ),
+    receiver_key: toBase64(
+      new Uint8Array(await encryptKeyForUser(receiverId, keyBuffer))
+    ),
+    sender_key: toBase64(
+      new Uint8Array(await encryptKeyForUser(await getUserId(), keyBuffer))
+    ),
+  };
+}
+
+async function getChats() {
+  const userPrivateKey = await getUserPrivateKey();
+  const id = (await getState()).user.id;
+  return Promise.all((await get("/chat")).map(
+    async ({ sender_key, receiver_key, cipher, ...other }: any) => {
+      const encryptedKey = fromBase64(
+        other.sender_id == id ? sender_key : receiver_key
+      );
+      const keyRaw = await decryptRSA(
+        userPrivateKey,
+        new Uint8Array(encryptedKey)
+      );
+      const key = await importAESGCMKey(keyRaw);
+      return {
+        ...other,
+        message: new TextDecoder().decode(await decryptAESGCM(key, fromBase64(cipher))),
+      };
+    }
+  ));
+}
+
+async function runChatWs() {
+  return new Promise((resolve, reject) => {
+    const ws = new WebSocket(`${API_URL}/chat/ws`);
+    const errorListener = () => {
+      ws.removeEventListener("error", errorListener);
+      reject();
+    };
+    ws.addEventListener("error", errorListener);
+    ws.addEventListener("open", () => {
+      ws.addEventListener("message", (e) => {
+        const message = e.data;
+        if (typeof message == "string") {
+          console.log("From Server: ", message);
+        }
+      });
+
+      resolve({
+        send: async (receiverId: string, message: string) => {
+          ws.send(
+            JSON.stringify({
+              type: "SendChatRequest",
+              ...(await getChatData(receiverId, message)),
+            })
+          );
+        },
+      });
+    });
+  });
 }
 
 (globalThis as any).API = {
@@ -168,5 +227,7 @@ async function getUser(id: string) {
   logout,
   getState,
   getKeys,
-  getUser
-}
+  getUser,
+  getChats,
+  runChatWs,
+};

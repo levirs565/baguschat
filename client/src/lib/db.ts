@@ -1,0 +1,18 @@
+import Dexie, {} from "dexie"
+
+const db = new Dexie("app_db");
+
+db.version(1).stores({
+    user_data: "++name, data"
+})
+
+export async function saveUserPrivateKey(key: CryptoKey) {
+    await db.user_data.add({
+        name: "private_key",
+        data: key
+    })
+}
+
+export async function getUserPrivateKey() {
+    return (await db.user_data.get("private_key")).data;
+}

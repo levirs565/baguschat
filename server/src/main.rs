@@ -12,6 +12,7 @@ use crate::core::{AppError, AppState, global_error_handler};
 mod core;
 mod auth;
 mod user;
+mod chat;
 mod utils;
 
 #[actix_web::main]
@@ -69,6 +70,7 @@ async fn main() -> std::io::Result<()> {
             .app_data(app_data.clone())
             .service(crate::auth::scope())
             .service(crate::user::scope())
+            .service(crate::chat::scope())
     })
     .bind(("127.0.0.1", 8080))?
     .run()
