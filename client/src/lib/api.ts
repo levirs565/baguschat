@@ -20,7 +20,7 @@ import {
   importAESGCMKey,
   decryptAESGCM,
 } from "./crypto";
-import { getUserPrivateKey, saveUserPrivateKey } from "./db";
+import { getUserPrivateKey, putUserPrivateKey } from "./db";
 
 const srpClient = createSRPClient("SHA-256", 2048);
 
@@ -121,7 +121,7 @@ async function login(username: string, password: string) {
   );
   const rsaPrivateKey = await importRSAPrivateKey(rsaPrivateKeyRaw);
 
-  await saveUserPrivateKey(rsaPrivateKey);
+  await putUserPrivateKey(rsaPrivateKey);
 
   return true;
 }

@@ -6,8 +6,8 @@ db.version(1).stores({
     user_data: "++name, data"
 })
 
-export async function saveUserPrivateKey(key: CryptoKey) {
-    await db.user_data.add({
+export async function putUserPrivateKey(key: CryptoKey) {
+    await db.user_data.put({
         name: "private_key",
         data: key
     })
