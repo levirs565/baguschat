@@ -258,6 +258,35 @@ async fn get_state(session: Session, data: web::Data<AppState>) -> AppResponse<G
     .await
 }
 
+#[derive(Serialize)]
+struct GetKeysResponse {
+    #[serde(with = "base64_field")]
+    private_key_encrypted: Vec<u8>,
+    #[serde(with = "base64_field")]
+    public_key: Vec<u8>,
+}
+
+#[get("keys")]
+async fn get_keys(session: Session, data: web::Data<AppState>) -> AppResponse<GetKeysResponse> {
+    AppResponse::wrap_async(|| async {
+        guard_auth(&session, true)?;
+        let user_id = get_userid(&session).unwrap();
+
+        let data = sqlx::query!(
+            "SELECT private_key_encrypted, public_key FROM Users WHERE id = $1",
+            user_id
+        )
+        .fetch_one(&data.db_pool)
+        .await
+        .map_err(|_| AppError::Internal)?;
+        return Ok(GetKeysResponse {
+            private_key_encrypted: data.private_key_encrypted,
+            public_key: data.public_key,
+        });
+    })
+    .await
+}
+
 pub fn get_userid(session: &Session) -> Option<Uuid> {
     match session.get::<Uuid>(USER_SESSION_KEY) {
         Ok(option) => option,
@@ -280,4 +309,5 @@ pub fn scope() -> Scope {
         .service(srp_auth)
         .service(logout)
         .service(get_state)
+        .service(get_keys)
 }

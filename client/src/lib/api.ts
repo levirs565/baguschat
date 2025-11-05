@@ -154,9 +154,14 @@ async function getState() {
   return get("/auth/state");
 }
 
+async function getKeys() {
+  return get("/auth/keys")
+}
+
 (globalThis as any).API = {
   signup,
   login,
   logout,
-  getState
+  getState,
+  getKeys
 }
