@@ -1,6 +1,6 @@
 <script>
 	import { Listgroup } from 'flowbite-svelte';
-	import { contacts } from '$lib/stores/chatStore.js';
+	import { contacts } from '$lib/stores/chatStore';
 	import ContactItem from './ContactItem.svelte';
 	import ProfileButton from '../common/ProfileButton.svelte';
 	import SettingsButton from '../common/SettingsButton.svelte';
