@@ -170,28 +170,35 @@ async function getChatData(receiverId: string, message: string) {
   };
 }
 
+async function decryptChat(
+  user_id: string,
+  { sender_key, receiver_key, cipher, ...other }: any
+) {
+  const encryptedKey = fromBase64(
+    other.sender_id == user_id ? sender_key : receiver_key
+  );
+  const keyRaw = await decryptRSA(
+    await getUserPrivateKey(),
+    new Uint8Array(encryptedKey)
+  );
+  const key = await importAESGCMKey(keyRaw);
+  return {
+    ...other,
+    message: new TextDecoder().decode(
+      await decryptAESGCM(key, fromBase64(cipher))
+    ),
+  };
+}
+
 async function getChats() {
   const userPrivateKey = await getUserPrivateKey();
   const id = (await getState()).user.id;
-  return Promise.all((await get("/chat")).map(
-    async ({ sender_key, receiver_key, cipher, ...other }: any) => {
-      const encryptedKey = fromBase64(
-        other.sender_id == id ? sender_key : receiver_key
-      );
-      const keyRaw = await decryptRSA(
-        userPrivateKey,
-        new Uint8Array(encryptedKey)
-      );
-      const key = await importAESGCMKey(keyRaw);
-      return {
-        ...other,
-        message: new TextDecoder().decode(await decryptAESGCM(key, fromBase64(cipher))),
-      };
-    }
-  ));
+  return Promise.all((await get("/chat")).map(decryptChat));
 }
 
 async function runChatWs() {
+   const id = (await getState()).user.id;
+
   return new Promise((resolve, reject) => {
     const ws = new WebSocket(`${API_URL}/chat/ws`);
     const errorListener = () => {
@@ -200,10 +207,22 @@ async function runChatWs() {
     };
     ws.addEventListener("error", errorListener);
     ws.addEventListener("open", () => {
-      ws.addEventListener("message", (e) => {
+      const chatListeners: any[] = [];
+
+      ws.addEventListener("message", async (e) => {
         const message = e.data;
         if (typeof message == "string") {
-          console.log("From Server: ", message);
+          try {
+            const { type, ...rest } = JSON.parse(message);
+            if (type == "ReceiveChat") {
+              const chat = await decryptChat(id, rest);
+              for (const listener of chatListeners) {
+                listener(chat);
+              }
+            }
+          } catch {
+            console.log(`Server: ${message}`);
+          }
         }
       });
 
@@ -211,14 +230,25 @@ async function runChatWs() {
         send: async (receiverId: string, message: string) => {
           ws.send(
             JSON.stringify({
-              type: "SendChatRequest",
+              type: "SendChat",
               ...(await getChatData(receiverId, message)),
             })
           );
         },
+        addChatListener: (listener: any) => {
+          chatListeners.push(listener);
+        },
       });
     });
   });
+}
+
+async function runChatWsTest() {
+  const ws = await runChatWs();
+  ws.addChatListener((chat) => {
+    console.log(chat.message);
+  })
+  return ws
 }
 
 (globalThis as any).API = {
@@ -229,5 +259,5 @@ async function runChatWs() {
   getKeys,
   getUser,
   getChats,
-  runChatWs,
+  runChatWs: runChatWsTest,
 };

@@ -1,18 +1,20 @@
 use std::env;
 
+use actix::Actor;
 use actix_cors::Cors;
 use actix_session::{storage::RedisSessionStore, SessionMiddleware};
 use actix_web::cookie::Key;
 use actix_web::middleware::ErrorHandlers;
 use actix_web::web::JsonConfig;
-use actix_web::{App, HttpServer, web};
+use actix_web::{web, App, HttpServer};
 use sqlx::postgres::PgPoolOptions;
 
-use crate::core::{AppError, AppState, global_error_handler};
-mod core;
+use crate::chat::ChatRouter;
+use crate::core::{global_error_handler, AppError, AppState};
 mod auth;
-mod user;
 mod chat;
+mod core;
+mod user;
 mod utils;
 
 #[actix_web::main]
@@ -38,6 +40,9 @@ async fn main() -> std::io::Result<()> {
     let redis_store = RedisSessionStore::new(redis_url).await.unwrap();
 
     println!("Starting server...");
+
+    let chat_router = web::Data::new(ChatRouter::default().start());
+
     HttpServer::new(move || {
         let cors = Cors::default()
             .allowed_origin("http://localhost:5173")
@@ -68,6 +73,7 @@ async fn main() -> std::io::Result<()> {
                     .build(),
             )
             .app_data(app_data.clone())
+            .app_data(chat_router.clone())
             .service(crate::auth::scope())
             .service(crate::user::scope())
             .service(crate::chat::scope())
