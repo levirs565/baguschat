@@ -1,5 +1,9 @@
+use std::time::{Duration, Instant};
+
+use actix::prelude::*;
+use actix::Actor;
 use actix_web::{get, rt, web, Error, HttpRequest, HttpResponse, Scope};
-use actix_ws::AggregatedMessage;
+use actix_web_actors::ws::{self, WebsocketContext};
 use futures_util::{StreamExt as _, TryFutureExt};
 use serde::{Deserialize, Serialize};
 use sqlx::prelude::FromRow;
@@ -134,6 +138,92 @@ async fn send_chat(
     .await
 }
 
+struct WsConnection {
+    hb: Instant,
+    user_id: Uuid,
+    db_pool: DBPool,
+}
+
+const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(5);
+const CLIENT_TIMEOUT: Duration = Duration::from_secs(10);
+
+impl WsConnection {
+    fn new(user_id: Uuid, db_pool: DBPool) -> WsConnection {
+        WsConnection {
+            user_id: user_id,
+            db_pool: db_pool,
+            hb: Instant::now(),
+        }
+    }
+
+    fn hb(&self, ctx: &mut WebsocketContext<Self>) {
+        ctx.run_interval(HEARTBEAT_INTERVAL, |act, ctx| {
+            if Instant::now().duration_since(act.hb) > CLIENT_TIMEOUT {
+                ctx.stop();
+            }
+
+            ctx.ping(b"PING");
+        });
+    }
+}
+
+impl Actor for WsConnection {
+    type Context = WebsocketContext<Self>;
+
+    fn started(&mut self, ctx: &mut Self::Context) {
+        self.hb(ctx);
+    }
+}
+
+impl StreamHandler<Result<ws::Message, ws::ProtocolError>> for WsConnection {
+    fn handle(&mut self, msg: Result<ws::Message, ws::ProtocolError>, ctx: &mut Self::Context) {
+        match msg {
+            Ok(ws::Message::Ping(msg)) => {
+                self.hb = Instant::now();
+                ctx.pong(&msg);
+            }
+            Ok(ws::Message::Pong(_)) => {
+                self.hb = Instant::now();
+            }
+            Ok(ws::Message::Text(text)) => {
+                let json = serde_json::from_str::<WsRequestMessage>(&text);
+
+                match json {
+                    Err(_) => ctx.text("Error"),
+                    Ok(v) => match v {
+                        WsRequestMessage::SendChatRequest(data) => {
+                            let pool = self.db_pool.clone();
+                            let user_id = self.user_id.clone();
+                            let fut = async move { send_chat(&pool, user_id, data).await };
+                            ctx.spawn(fut.into_actor(self).map(|res, _, ctx| {
+                                match res.0 {
+                                    Ok(_) => ctx.text("Success"),
+                                    Err(_) => ctx.text("Fail"),
+                                }
+                                ()
+                            }));
+                        }
+                    },
+                }
+            }
+            Ok(ws::Message::Binary(bin)) => {
+                ctx.binary(bin);
+            }
+            Ok(ws::Message::Close(reason)) => {
+                ctx.close(reason);
+                ctx.stop();
+            }
+            Ok(ws::Message::Continuation(_)) => {
+                ctx.stop();
+            }
+            Ok(ws::Message::Nop) => {}
+            Err(e) => {
+                eprintln!("Unexpected error! {e}");
+            }
+        }
+    }
+}
+
 async fn ws(
     req_session: actix_session::Session,
     data: web::Data<AppState>,
@@ -144,46 +234,13 @@ async fn ws(
 
     let user_id = get_userid(&req_session).unwrap();
     let db_pool = data.db_pool.clone();
-    let (res, mut session, stream) = actix_ws::handle(&req, stream)?;
+    
+    let ws_connection = WsConnection::new(
+        user_id,
+        db_pool
+    );
 
-    let mut stream = stream
-        .aggregate_continuations()
-        .max_continuation_size(2_usize.pow(20));
-
-    rt::spawn(async move {
-        while let Some(msg) = stream.next().await {
-            match msg {
-                Ok(AggregatedMessage::Text(text)) => {
-                    let json = serde_json::from_str::<WsRequestMessage>(&text);
-
-                    match json {
-                        Err(_) => session.text("Error").await.unwrap(),
-                        Ok(v) => match v {
-                            WsRequestMessage::SendChatRequest(data) => {
-                                let res = send_chat(&db_pool, user_id, data).await;
-                                match res.0 {
-                                    Ok(_) => session.text("Success"),
-                                    Err(_) => session.text("Fail"),
-                                }
-                                .await
-                                .unwrap()
-                            }
-                        },
-                    }
-                }
-                Ok(AggregatedMessage::Binary(bin)) => {
-                    session.binary(bin).await.unwrap();
-                }
-
-                Ok(AggregatedMessage::Ping(msg)) => {
-                    session.pong(&msg).await.unwrap();
-                }
-
-                _ => {}
-            }
-        }
-    });
-
+    let res = ws::start(ws_connection, &req, stream)?;
     Ok(res)
 }
 
