@@ -14,7 +14,7 @@ function createAuthStore() {
         * @param {string} username
         */
 		login: (username) => {
-			const user = { username, name: username };
+			const user = { username: username, name: username };
 			if (browser) localStorage.setItem('currentUser', JSON.stringify(user));
 			set({ user });
 		},

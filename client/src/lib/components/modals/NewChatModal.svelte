@@ -28,6 +28,6 @@
 	</form>
 
 	<svelte:fragment>
-		<Button type="submit" form="search-form">Cari & Mulai Chat</Button>
+		<Button type="submit" form="search-form" class="cursor-pointer">Cari & Mulai Chat</Button>
 	</svelte:fragment>
 </Modal>

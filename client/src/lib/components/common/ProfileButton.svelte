@@ -1,7 +1,13 @@
 <script>
 	import { Avatar } from 'flowbite-svelte';
+	import { isProfileModalOpen } from '$lib/stores/uiStore.js';
 </script>
 
-<button class="flex items-center">
+<button
+	type="button"
+	class="flex items-center cursor-pointer"
+	on:click={() => isProfileModalOpen.set(true)}
+	aria-label="Buka pengaturan profil"
+>
 	<Avatar src="https://via.placeholder.com/150/808080/FFFFFF?text=U" />
 </button>
