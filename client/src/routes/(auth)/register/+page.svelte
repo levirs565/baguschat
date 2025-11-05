@@ -1,7 +1,8 @@
 <script>
 	import { Card, Button, Label, Input, Heading } from 'flowbite-svelte';
+    import { goto } from '$app/navigation';
 
-	let email = '';
+	let username = '';
 	let password = '';
 	let confirmPassword = '';
 
@@ -10,7 +11,8 @@
 			alert('Password tidak cocok!');
 			return;
 		}
-		console.log('Mencoba mendaftar dengan:', { email, password });
+		console.log('Mencoba mendaftar dengan:', { username, password });
+        goto('/login');
 	}
 </script>
 
@@ -26,7 +28,7 @@
 
 		<div>
 			<Label for="username" class="mb-2">Username Anda</Label>
-			<Input type="text" id="username" bind:value={email} placeholder="username" required />
+			<Input type="text" id="username" bind:value={username} placeholder="username" required />
 		</div>
 
 		<div>
