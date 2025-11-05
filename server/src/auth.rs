@@ -229,6 +229,7 @@ async fn logout(session: Session) -> AppResponse<ActionResult> {
 
 #[derive(Serialize)]
 struct GetStateResponseUser {
+    id: Uuid,
     username: String,
 }
 
@@ -249,6 +250,7 @@ async fn get_state(session: Session, data: web::Data<AppState>) -> AppResponse<G
                     .map_err(|_| AppError::Internal)?;
                 return Ok(GetStateResponse {
                     user: Some(GetStateResponseUser {
+                        id: user_id,
                         username: data.username,
                     }),
                 });

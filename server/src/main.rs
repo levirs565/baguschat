@@ -9,8 +9,9 @@ use actix_web::{App, HttpServer, web};
 use sqlx::postgres::PgPoolOptions;
 
 use crate::core::{AppError, AppState, global_error_handler};
-mod auth;
 mod core;
+mod auth;
+mod user;
 mod utils;
 
 #[actix_web::main]
@@ -67,6 +68,7 @@ async fn main() -> std::io::Result<()> {
             )
             .app_data(app_data.clone())
             .service(crate::auth::scope())
+            .service(crate::user::scope())
     })
     .bind(("127.0.0.1", 8080))?
     .run()

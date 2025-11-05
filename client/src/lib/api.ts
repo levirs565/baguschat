@@ -158,10 +158,15 @@ async function getKeys() {
   return get("/auth/keys")
 }
 
+async function getUser(id: string) {
+  return get(`/user/${id}`)
+}
+
 (globalThis as any).API = {
   signup,
   login,
   logout,
   getState,
-  getKeys
+  getKeys,
+  getUser
 }
