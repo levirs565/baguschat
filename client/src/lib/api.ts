@@ -78,17 +78,7 @@ interface GetUserResponse {
   public_key: string;
 }
 
-interface ChatItem {
-  id: string;
-  created_at: string;
-  sender_id: string;
-  receiver_id?: string;
-  sender_key: string;
-  receiver_key: string;
-  cipher: string;
-}
-
-type ChatItem2 = {
+type ChatItem = {
   id: string;
   created_at: string;
   sender_id: string;
@@ -112,7 +102,7 @@ type ChatItem2 = {
 
 interface ChatPartners {
   id: string;
-  last_chat: ChatItem2;
+  last_chat: ChatItem;
 }
 
 class APIService {
@@ -323,7 +313,7 @@ class ClientSession {
   async getChats() {
     return Promise.all(
       (await api.getChats()).map(
-        this.#cryptoService.decryptChat.bind(this.#cryptoService)
+        this.#cryptoService.decryptChat2.bind(this.#cryptoService)
       )
     );
   }
@@ -354,13 +344,6 @@ class ClientSession {
     });
   }
 }
-
-type DecryptedChatItem = Omit<
-  ChatItem,
-  "receiver_key" | "sender_key" | "cipher"
-> & {
-  message: string;
-};
 
 class CryptoService {
   #apiService: APIService;
@@ -432,24 +415,7 @@ class CryptoService {
     };
   }
 
-  async decryptChat({ sender_key, receiver_key, cipher, ...other }: ChatItem) {
-    const encryptedKey = fromBase64(
-      other.sender_id == this.#currentUserId ? sender_key : receiver_key
-    );
-    const keyRaw = await decryptRSA(
-      this.#currentPrivateKey,
-      new Uint8Array(encryptedKey)
-    );
-    const key = await importAESGCMKey(keyRaw);
-    return {
-      ...other,
-      message: new TextDecoder().decode(
-        await decryptAESGCM(key, fromBase64(cipher))
-      ),
-    };
-  }
-
-  async decryptChat2({ sender_key, receiver_key, ...other }: ChatItem2) {
+  async decryptChat2({ sender_key, receiver_key, ...other }: ChatItem) {
     const encryptedKey = fromBase64(
       other.sender_id == this.#currentUserId ? sender_key : receiver_key
     );
@@ -495,10 +461,12 @@ interface SendChatRequest {
 }
 
 type WsRequest = { type: "SendChat" } & SendChatRequest;
-type WsReponseMessage = { type: "ReceiveChat" } & ChatItem;
+type WsReponseMessage = { type: "ReceiveChat"; chat: ChatItem };
+
+type DecryptedChat2 = Awaited<ReturnType<CryptoService["decryptChat2"]>>;
 
 interface ChatWsEventMap {
-  "receive-chat": CustomEvent<DecryptedChatItem>;
+  "receive-chat": CustomEvent<DecryptedChat2>;
 }
 
 class ChatWs extends TypedEventTarget<ChatWsEventMap> {
@@ -530,7 +498,7 @@ class ChatWs extends TypedEventTarget<ChatWsEventMap> {
       try {
         const { type, ...rest } = JSON.parse(message) as WsReponseMessage;
         if (type == "ReceiveChat") {
-          const chat = await this.#cryptoservice.decryptChat(rest);
+          const chat = await this.#cryptoservice.decryptChat2(rest.chat);
           this.dispatchTypedEvent(
             "receive-chat",
             new CustomEvent("receive-chat", {
@@ -550,7 +518,7 @@ async function runChatWsTest() {
     await client.createClientSession(undefined)
   )?.createChatWs())!;
   ws.addEventListener("receive-chat", (e) => {
-    console.log(e.detail.message);
+    if (e.detail.type == "Text") console.log(e.detail.message);
   });
   return ws;
 }

@@ -24,36 +24,6 @@ pub enum ConversationType {
     Image,
 }
 
-#[derive(FromRow)]
-struct RawChatItem {
-    id: Uuid,
-    created_at: chrono::NaiveDateTime,
-    sender_id: Uuid,
-    receiver_id: Option<Uuid>,
-    sender_key: Vec<u8>,
-    receiver_key: Vec<u8>,
-    contet_type: ConversationType,
-    cipher: Option<Vec<u8>>,
-    filename: Option<String>,
-    mime_type: Option<String>,
-    size: Option<i64>,
-    path: Option<String>,
-}
-
-#[derive(FromRow, Serialize)]
-struct ChatItem {
-    id: Uuid,
-    created_at: chrono::NaiveDateTime,
-    sender_id: Uuid,
-    receiver_id: Option<Uuid>,
-    #[serde(with = "base64_field")]
-    sender_key: Vec<u8>,
-    #[serde(with = "base64_field")]
-    receiver_key: Vec<u8>,
-    #[serde(with = "base64_field")]
-    cipher: Vec<u8>,
-}
-
 #[derive(Serialize)]
 enum FileChatType {
     File,
@@ -77,7 +47,7 @@ enum ChatContent {
 }
 
 #[derive(Serialize)]
-struct ChatItem2 {
+struct ChatItem {
     id: Uuid,
     created_at: chrono::NaiveDateTime,
     sender_id: Uuid,
@@ -100,27 +70,53 @@ async fn get(
 
         let user_id = get_userid(&session).unwrap();
 
-        sqlx::query_as!(
-            ChatItem,
+        let mut data = sqlx::query!(
             r#"
-            SELECT 
+            SELECT
                 conversations.id, 
-                created_at, 
-                sender_id,
-                receiver_id,
-                sender_key,
-                receiver_key,
-                cipher
-            FROM conversations
-            JOIN conversations_text ON conversations.id = conversations_text.id
-            WHERE conversations.receiver_id = $1 OR conversations.sender_id = $1
-            ORDER BY conversations.created_at DESC
+                created_at, sender_id, receiver_id, sender_key, receiver_key, 
+                contet_type as "contet_type: ConversationType",
+                cipher as "cipher?",
+                filename as "filename?", mime_type as "mime_type?", 
+                size as "size?", path as "path?"
+            FROM 
+                conversations
+            LEFT JOIN conversations_text ON conversations_text.id = conversations.id
+            LEFT JOIN conversations_image ON conversations_image.id = conversations.id
+            WHERE sender_id = $1 OR receiver_id = $1 
+            ORDER BY created_at
             "#,
             user_id
         )
         .fetch_all(&data.db_pool)
         .await
-        .map_err(|_| AppError::Internal)
+        .map_err(|_| AppError::Internal)?;
+
+        let result = data.iter_mut().map(|raw| ChatItem {
+            id: raw.id,
+            created_at: raw.created_at,
+            sender_id: raw.sender_id,
+            receiver_id: raw.receiver_id,
+            sender_key: raw.sender_key.clone(),
+            receiver_key: raw.receiver_key.clone(),
+            content: match raw.contet_type {
+                ConversationType::Text => ChatContent::Text {
+                    cipher: raw.cipher.clone().unwrap(),
+                },
+                ConversationType::File | ConversationType::Image => ChatContent::File {
+                    file_type: match raw.contet_type {
+                        ConversationType::File => FileChatType::File,
+                        _ => FileChatType::Image,
+                    },
+                    filename: raw.filename.clone().unwrap(),
+                    mime_type: raw.mime_type.clone().unwrap(),
+                    size: raw.size.unwrap(),
+                    path: raw.path.clone().unwrap(),
+                },
+            },
+        });
+
+        Ok(result.collect())
     })
     .await
 }
@@ -128,7 +124,7 @@ async fn get(
 #[derive(Serialize)]
 struct ChatPartnerItem {
     id: Uuid,
-    last_chat: ChatItem2,
+    last_chat: ChatItem,
 }
 
 #[get("partners")]
@@ -174,7 +170,7 @@ async fn get_partners(
             LEFT JOIN conversations_text ON conversations_text.id = RankedChats.id
             LEFT JOIN conversations_image ON conversations_image.id = RankedChats.id
             WHERE RankedChats.rank = 1
-            ORDER BY created_at
+            ORDER BY created_at DESC
             "#,
             user_id
         )
@@ -184,7 +180,7 @@ async fn get_partners(
 
         let mapped = data.iter_mut().map(|raw| ChatPartnerItem {
             id: raw.other_user_id.unwrap(),
-            last_chat: ChatItem2 {
+            last_chat: ChatItem {
                 id: raw.id,
                 created_at: raw.created_at,
                 sender_id: raw.sender_id,
@@ -234,7 +230,7 @@ enum WsRequestMessage {
 #[derive(Serialize)]
 #[serde(tag = "type")]
 enum WsReponseMessage {
-    ReceiveChat(ChatItem),
+    ReceiveChat { chat: ChatItem },
 }
 
 async fn send_chat(
@@ -291,7 +287,9 @@ async fn send_chat(
                 receiver_id: Some(request.receiver_id),
                 sender_key: request.sender_key,
                 receiver_key: request.receiver_key,
-                cipher: request.message_cipher,
+                content: ChatContent::Text {
+                    cipher: request.message_cipher,
+                },
             },
         });
 
@@ -365,7 +363,9 @@ impl Handler<RouteChat> for WsConnection {
     type Result = ();
 
     fn handle(&mut self, msg: RouteChat, ctx: &mut Self::Context) -> Self::Result {
-        let data = WsReponseMessage::ReceiveChat(msg.chat_item);
+        let data = WsReponseMessage::ReceiveChat {
+            chat: msg.chat_item,
+        };
         let json = serde_json::to_string(&data).unwrap();
 
         ctx.text(json);
