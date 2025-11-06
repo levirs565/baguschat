@@ -29,7 +29,7 @@ import { TypedEventTarget } from "typescript-event-target";
 
 const srpClient = createSRPClient("SHA-256", 2048);
 
-interface SignupRequest {
+export interface SignupRequest {
   username: string;
   srp_salt: string;
   srp_verifier: string;
@@ -37,48 +37,48 @@ interface SignupRequest {
   public_key: string;
 }
 
-interface SRPHelloRequest {
+export interface SRPHelloRequest {
   username: string;
   srp_client_public_key: string;
 }
 
-interface SRPHelloResponse {
+export interface SRPHelloResponse {
   srp_salt: string;
   srp_server_public_key: string;
 }
 
-interface ActionResultResponse {
+export interface ActionResultResponse {
   success: boolean;
 }
 
-interface SRPAuthRequest {
+export interface SRPAuthRequest {
   srp_evidence: string;
 }
 
-interface SRPAuthResponse {
+export interface SRPAuthResponse {
   srp_evidence: string;
 }
 
-interface GetStateResponseUser {
+export interface GetStateResponseUser {
   id: string;
   username: String;
 }
 
-interface GetStateResponse {
+export interface GetStateResponse {
   user?: GetStateResponseUser;
 }
 
-interface GetKeysResponse {
+export interface GetKeysResponse {
   private_key_encrypted: string;
   public_key: string;
 }
 
-interface GetUserResponse {
+export interface GetUserResponse {
   username: string;
   public_key: string;
 }
 
-type ChatItem = {
+export type ChatItem = {
   id: string;
   created_at: string;
   sender_id: string;
@@ -100,12 +100,12 @@ type ChatItem = {
     }
 );
 
-interface ChatPartners {
+export  interface ChatPartners {
   id: string;
   last_chat: ChatItem;
 }
 
-class APIService {
+export class APIService {
   instance: AxiosInstance;
   baseUrl: string;
   constructor(apiUrl: string = "http://localhost:8080") {
@@ -182,7 +182,7 @@ class APIService {
   }
 }
 
-class ClientService {
+export class ClientService {
   #apiService: APIService;
 
   constructor(apiService: APIService) {
@@ -291,7 +291,7 @@ class ClientService {
   }
 }
 
-class ClientSession {
+export class ClientSession {
   #cryptoService: CryptoService;
   #apiService: APIService;
 
@@ -308,6 +308,14 @@ class ClientSession {
       privateKey,
       publickey
     );
+  }
+
+  async getState() {
+    return this.#apiService.getState();
+  }
+
+  async logout() {
+    return this.#apiService.logout();
   }
 
   async getChats() {
@@ -345,7 +353,7 @@ class ClientSession {
   }
 }
 
-class CryptoService {
+export class CryptoService {
   #apiService: APIService;
 
   #currentUserId: string;
