@@ -16,6 +16,30 @@ use crate::auth::{get_userid, guard_auth};
 use crate::core::{ActionResult, AppError, AppResponse, AppState, DBPool};
 use crate::utils::base64_field;
 
+#[derive(sqlx::Type, Debug)]
+#[sqlx(type_name = "conversation_type", rename_all = "lowercase")]
+pub enum ConversationType {
+    Text,
+    File,
+    Image,
+}
+
+#[derive(FromRow)]
+struct RawChatItem {
+    id: Uuid,
+    created_at: chrono::NaiveDateTime,
+    sender_id: Uuid,
+    receiver_id: Option<Uuid>,
+    sender_key: Vec<u8>,
+    receiver_key: Vec<u8>,
+    contet_type: ConversationType,
+    cipher: Option<Vec<u8>>,
+    filename: Option<String>,
+    mime_type: Option<String>,
+    size: Option<i64>,
+    path: Option<String>,
+}
+
 #[derive(FromRow, Serialize)]
 struct ChatItem {
     id: Uuid,
@@ -28,6 +52,42 @@ struct ChatItem {
     receiver_key: Vec<u8>,
     #[serde(with = "base64_field")]
     cipher: Vec<u8>,
+}
+
+#[derive(Serialize)]
+enum FileChatType {
+    File,
+    Image,
+}
+
+#[derive(Serialize)]
+#[serde(tag = "type")]
+enum ChatContent {
+    Text {
+        #[serde(with = "base64_field")]
+        cipher: Vec<u8>,
+    },
+    File {
+        file_type: FileChatType,
+        filename: String,
+        mime_type: String,
+        size: i64,
+        path: String,
+    },
+}
+
+#[derive(Serialize)]
+struct ChatItem2 {
+    id: Uuid,
+    created_at: chrono::NaiveDateTime,
+    sender_id: Uuid,
+    receiver_id: Option<Uuid>,
+    #[serde(with = "base64_field")]
+    sender_key: Vec<u8>,
+    #[serde(with = "base64_field")]
+    receiver_key: Vec<u8>,
+    #[serde(flatten)]
+    content: ChatContent,
 }
 
 #[get("")]
@@ -65,6 +125,95 @@ async fn get(
     .await
 }
 
+#[derive(Serialize)]
+struct ChatPartnerItem {
+    id: Uuid,
+    last_chat: ChatItem2,
+}
+
+#[get("partners")]
+async fn get_partners(
+    session: actix_session::Session,
+    data: web::Data<AppState>,
+) -> AppResponse<Vec<ChatPartnerItem>> {
+    AppResponse::wrap_async(|| async {
+        guard_auth(&session, true)?;
+
+        let user_id = get_userid(&session).unwrap();
+
+        let mut data = sqlx::query!(
+            r#"
+            WITH RankedChats AS (
+                SELECT
+                    conversations.*,
+                    CASE
+                        WHEN sender_id = $1 THEN receiver_id
+                        ELSE sender_id
+                    END AS other_user_id,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY 
+                            CASE
+                                WHEN sender_id = $1 THEN receiver_id
+                                ELSE sender_id
+                            END
+                        ORDER BY created_at DESC
+                    ) AS rank  
+                FROM conversations
+                WHERE sender_id = $1 OR receiver_id = $1 
+            )
+            SELECT
+                other_user_id,
+                RankedChats.id, 
+                created_at, sender_id, receiver_id, sender_key, receiver_key, 
+                contet_type as "contet_type: ConversationType",
+                cipher as "cipher?",
+                filename as "filename?", mime_type as "mime_type?", 
+                size as "size?", path as "path?"
+            FROM 
+                RankedChats
+            LEFT JOIN conversations_text ON conversations_text.id = RankedChats.id
+            LEFT JOIN conversations_image ON conversations_image.id = RankedChats.id
+            WHERE RankedChats.rank = 1
+            ORDER BY created_at
+            "#,
+            user_id
+        )
+        .fetch_all(&data.db_pool)
+        .await
+        .map_err(|_| AppError::Internal)?;
+
+        let mapped = data.iter_mut().map(|raw| ChatPartnerItem {
+            id: raw.other_user_id.unwrap(),
+            last_chat: ChatItem2 {
+                id: raw.id,
+                created_at: raw.created_at,
+                sender_id: raw.sender_id,
+                receiver_id: raw.receiver_id,
+                sender_key: raw.sender_key.clone(),
+                receiver_key: raw.receiver_key.clone(),
+                content: match raw.contet_type {
+                    ConversationType::Text => ChatContent::Text {
+                        cipher: raw.cipher.clone().unwrap(),
+                    },
+                    ConversationType::File | ConversationType::Image => ChatContent::File {
+                        file_type: match raw.contet_type {
+                            ConversationType::File => FileChatType::File,
+                            _ => FileChatType::Image,
+                        },
+                        filename: raw.filename.clone().unwrap(),
+                        mime_type: raw.mime_type.clone().unwrap(),
+                        size: raw.size.unwrap(),
+                        path: raw.path.clone().unwrap(),
+                    },
+                },
+            },
+        });
+
+        Ok(mapped.collect())
+    })
+    .await
+}
+
 #[derive(Deserialize)]
 struct SendChatRequest {
     receiver_id: Uuid,
@@ -86,14 +235,6 @@ enum WsRequestMessage {
 #[serde(tag = "type")]
 enum WsReponseMessage {
     ReceiveChat(ChatItem),
-}
-
-#[derive(sqlx::Type)]
-#[sqlx(type_name = "conversation_type", rename_all = "lowercase")]
-pub enum ConversationType {
-    Text,
-    File,
-    Image,
 }
 
 async fn send_chat(
@@ -366,5 +507,6 @@ async fn ws(
 pub fn scope() -> Scope {
     web::scope("/chat")
         .service(get)
+        .service(get_partners)
         .route("ws", web::get().to(ws))
 }

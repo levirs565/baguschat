@@ -88,6 +88,33 @@ interface ChatItem {
   cipher: string;
 }
 
+type ChatItem2 = {
+  id: string;
+  created_at: string;
+  sender_id: string;
+  receiver_id?: string;
+  sender_key: string;
+  receiver_key: string;
+} & (
+  | {
+      type: "Text";
+      cipher: string;
+    }
+  | {
+      type: "File";
+      file_type: "File" | "Image";
+      filename: string;
+      mime_type: string;
+      size: number;
+      path: string;
+    }
+);
+
+interface ChatPartners {
+  id: string;
+  last_chat: ChatItem2;
+}
+
 class APIService {
   instance: AxiosInstance;
   baseUrl: string;
@@ -158,6 +185,10 @@ class APIService {
 
   getChats() {
     return this.get<ChatItem[]>(`/chat`);
+  }
+
+  getChatPartners() {
+    return this.get<ChatPartners[]>(`/chat/partners`);
   }
 }
 
@@ -290,9 +321,20 @@ class ClientSession {
   }
 
   async getChats() {
-    return Promise.all((await api.getChats()).map(
-      this.#cryptoService.decryptChat.bind(this.#cryptoService)
-    ));
+    return Promise.all(
+      (await api.getChats()).map(
+        this.#cryptoService.decryptChat.bind(this.#cryptoService)
+      )
+    );
+  }
+
+  async getChatPartners() {
+    return Promise.all(
+      (await api.getChatPartners()).map(async ({ last_chat, ...other }) => ({
+        ...other,
+        last_chat: await this.#cryptoService.decryptChat2(last_chat),
+      }))
+    );
   }
 
   async createChatWs(): Promise<ChatWs> {
@@ -405,6 +447,43 @@ class CryptoService {
         await decryptAESGCM(key, fromBase64(cipher))
       ),
     };
+  }
+
+  async decryptChat2({ sender_key, receiver_key, ...other }: ChatItem2) {
+    const encryptedKey = fromBase64(
+      other.sender_id == this.#currentUserId ? sender_key : receiver_key
+    );
+    const keyRaw = await decryptRSA(
+      this.#currentPrivateKey,
+      new Uint8Array(encryptedKey)
+    );
+    const key = await importAESGCMKey(keyRaw);
+    const base = {
+      id: other.id,
+      created_at: other.created_at,
+      sender_id: other.sender_id,
+      receiver_id: other.receiver_id,
+    };
+
+    if (other.type == "Text")
+      return {
+        ...base,
+        type: other.type,
+        message: new TextDecoder().decode(
+          await decryptAESGCM(key, fromBase64(other.cipher))
+        ),
+      };
+    else
+      return {
+        ...base,
+        type: other.type,
+        key,
+        file_type: other.file_type,
+        filename: other.filename,
+        mime_type: other.mime_type,
+        size: other.size,
+        path: other.path,
+      };
   }
 }
 
