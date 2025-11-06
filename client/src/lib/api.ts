@@ -74,6 +74,7 @@ export interface GetKeysResponse {
 }
 
 export interface GetUserResponse {
+  id: string;
   username: string;
   public_key: string;
 }
@@ -173,8 +174,14 @@ export class APIService {
     return this.get<GetUserResponse>(`/user/${id}`);
   }
 
-  getChats() {
-    return this.get<ChatItem[]>(`/chat`);
+  listUser(username: string) {
+    const param = new URLSearchParams();
+    param.set("username", username);
+    return this.get<GetUserResponse[]>(`user?` + param.toString());
+  }
+
+  getChats(userid: string) {
+    return this.get<ChatItem[]>(`/chat/${userid}`);
   }
 
   getChatPartners() {
@@ -321,9 +328,9 @@ export class ClientSession {
     return this.#apiService.logout();
   }
 
-  async getChats() {
+  async getChats(userid: string) {
     return Promise.all(
-      (await this.#apiService.getChats()).map(
+      (await this.#apiService.getChats(userid)).map(
         this.#cryptoService.decryptChat2.bind(this.#cryptoService)
       )
     );
@@ -331,6 +338,10 @@ export class ClientSession {
 
   async getUser(id: string) {
     return this.#apiService.getUser(id);
+  }
+
+  async listUsers(username: string) {
+    return this.#apiService.listUser(username);
   }
 
   async getChatPartners() {

@@ -88,12 +88,12 @@ derived([sessionStore, activeContactId], ([session, activeContactId]) => ({
   session,
   activeContactId,
 })).subscribe(async ({ session, activeContactId }) => {
-  if (!session) {
+  if (!session || !activeContactId) {
     activeMessages.set([]);
     return;
   }
 
-  const chats = await session.getChats();
+  const chats = await session.getChats(activeContactId);
   activeMessages.set(chats);
 });
 

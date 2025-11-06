@@ -60,33 +60,45 @@ struct ChatItem {
     content: ChatContent,
 }
 
-#[get("")]
+#[get("{id}")]
 async fn get(
     session: actix_session::Session,
     data: web::Data<AppState>,
+    path: web::Path<Uuid>,
 ) -> AppResponse<Vec<ChatItem>> {
     AppResponse::wrap_async(|| async {
         guard_auth(&session, true)?;
 
+        let other_id = path.into_inner();
         let user_id = get_userid(&session).unwrap();
 
         let mut data = sqlx::query!(
             r#"
+            WITH PChats AS (
+                SELECT 
+                    *,
+                    CASE
+                        WHEN sender_id = $1 THEN receiver_id
+                        ELSE sender_id
+                    END AS other_user_id
+                FROM conversations
+            )
             SELECT
-                conversations.id, 
+                PChats.id, 
                 created_at, sender_id, receiver_id, sender_key, receiver_key, 
                 contet_type as "contet_type: ConversationType",
                 cipher as "cipher?",
                 filename as "filename?", mime_type as "mime_type?", 
                 size as "size?", path as "path?"
             FROM 
-                conversations
-            LEFT JOIN conversations_text ON conversations_text.id = conversations.id
-            LEFT JOIN conversations_image ON conversations_image.id = conversations.id
-            WHERE sender_id = $1 OR receiver_id = $1 
+                PChats
+            LEFT JOIN conversations_text ON conversations_text.id = PChats.id
+            LEFT JOIN conversations_image ON conversations_image.id = PChats.id
+            WHERE (sender_id = $1 OR receiver_id = $1) AND other_user_id = $2
             ORDER BY created_at
             "#,
-            user_id
+            user_id,
+            other_id
         )
         .fetch_all(&data.db_pool)
         .await
@@ -509,7 +521,7 @@ async fn ws(
 
 pub fn scope() -> Scope {
     web::scope("/chat")
-        .service(get)
         .service(get_partners)
         .route("ws", web::get().to(ws))
+        .service(get)
 }

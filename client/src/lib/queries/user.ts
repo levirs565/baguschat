@@ -14,13 +14,24 @@ export function createCurrentUserQueryOptions() {
 }
 
 export function createUserDataQueryOptions(userId: string) {
-  console.log("c", userId)
   return derived([sessionStore], ([session]) => {
     return {
       queryKey: ["user-data", userId],
       queryFn: async () => {
         if (!session) return null;
         return (await session.getUser(userId)) ?? null
+      }
+    }
+  })
+}
+
+export function createUserListQueryOptions(username: string) {
+  return derived([sessionStore], ([session]) => {
+    return {
+      queryKey: ["user-list", username],
+      queryFn: async () => {
+        if (!session) return null;
+        return (await session.listUsers(username)) ?? null
       }
     }
   })
