@@ -13,14 +13,15 @@ export function createCurrentUserQueryOptions() {
   });
 }
 
-export function createUserDataQueryOptions(userId: string) {
+export function createUserDataQueryOptions(userId: string | undefined | null) {
   return derived([sessionStore], ([session]) => {
     return {
       queryKey: ["user-data", userId],
       queryFn: async () => {
         if (!session) return null;
-        return (await session.getUser(userId)) ?? null
-      }
+        return (await session.getUser(userId!)) ?? null
+      },
+      enabled: !!userId
     }
   })
 }

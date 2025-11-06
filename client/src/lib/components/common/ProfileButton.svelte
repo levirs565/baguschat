@@ -9,5 +9,5 @@
 	on:click={() => isProfileModalOpen.set(true)}
 	aria-label="Buka pengaturan profil"
 >
-	<Avatar src="https://via.placeholder.com/150/808080/FFFFFF?text=U" />
+	<Avatar src="" />
 </button>
