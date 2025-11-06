@@ -100,7 +100,7 @@ export type ChatItem = {
     }
 );
 
-export  interface ChatPartners {
+export interface ChatPartners {
   id: string;
   last_chat: ChatItem;
 }
@@ -295,12 +295,15 @@ export class ClientSession {
   #cryptoService: CryptoService;
   #apiService: APIService;
 
+  userId: string;
+
   constructor(
     apiService: APIService,
     userid: string,
     privateKey: CryptoKey,
     publickey: CryptoKey
   ) {
+    this.userId = userid;
     this.#apiService = apiService;
     this.#cryptoService = new CryptoService(
       apiService,
@@ -320,18 +323,24 @@ export class ClientSession {
 
   async getChats() {
     return Promise.all(
-      (await api.getChats()).map(
+      (await this.#apiService.getChats()).map(
         this.#cryptoService.decryptChat2.bind(this.#cryptoService)
       )
     );
   }
 
+  async getUser(id: string) {
+    return this.#apiService.getUser(id);
+  }
+
   async getChatPartners() {
     return Promise.all(
-      (await api.getChatPartners()).map(async ({ last_chat, ...other }) => ({
-        ...other,
-        last_chat: await this.#cryptoService.decryptChat2(last_chat),
-      }))
+      (await this.#apiService.getChatPartners()).map(
+        async ({ last_chat, ...other }) => ({
+          ...other,
+          last_chat: await this.#cryptoService.decryptChat2(last_chat),
+        })
+      )
     );
   }
 
@@ -352,6 +361,10 @@ export class ClientSession {
     });
   }
 }
+
+export type DecryptedChatPartner = Awaited<
+  ReturnType<ClientSession["getChatPartners"]>
+>[number];
 
 export class CryptoService {
   #apiService: APIService;
@@ -471,13 +484,13 @@ interface SendChatRequest {
 type WsRequest = { type: "SendChat" } & SendChatRequest;
 type WsReponseMessage = { type: "ReceiveChat"; chat: ChatItem };
 
-type DecryptedChat2 = Awaited<ReturnType<CryptoService["decryptChat2"]>>;
+export type DecryptedChat2 = Awaited<ReturnType<CryptoService["decryptChat2"]>>;
 
 interface ChatWsEventMap {
   "receive-chat": CustomEvent<DecryptedChat2>;
 }
 
-class ChatWs extends TypedEventTarget<ChatWsEventMap> {
+export class ChatWs extends TypedEventTarget<ChatWsEventMap> {
   ws: WebSocket;
   #cryptoservice: CryptoService;
 

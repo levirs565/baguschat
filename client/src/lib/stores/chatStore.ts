@@ -1,60 +1,102 @@
-import { writable, derived } from 'svelte/store';
+import type { ChatWs, DecryptedChat2, DecryptedChatPartner } from "$lib/api";
+import { writable, derived, get } from "svelte/store";
+import { currentUserId, sessionStore } from "./sessionStore";
 
 export interface Contact {
-	id: number;
-	name: string;
-	avatar: string;
-	lastMessage: string;
+  id: number;
+  name: string;
+  avatar: string;
+  lastMessage: string;
 }
 
 export interface Message {
-	id: number;
-	text: string;
-	sender: 'me' | string;
-	time: string;
-	file?: any;
+  id: number;
+  text: string;
+  sender: "me" | string;
+  time: string;
+  file?: any;
 }
 
-type AllMessages = {
-	[contactId: number]: Message[];
+export const chatPartnersStore = writable<DecryptedChatPartner[]>([]);
+export const activeContactId = writable<string | null>(null);
+export const activeMessages = writable<DecryptedChat2[]>([]);
+export const chatWsStore = writable<ChatWs | null>();
+
+const onReceiveChat = (event: CustomEvent<DecryptedChat2>) => {
+  const activeId = get(activeContactId);
+
+  if (
+    activeId == event.detail.sender_id ||
+    activeId == event.detail.receiver_id
+  ) {
+    activeMessages.update((messages) => [...messages, event.detail]);
+  }
+
+  chatPartnersStore.update((partners) => {
+    let result = [...partners];
+    let index = result.findIndex(
+      (partner) =>
+        partner.id == event.detail.sender_id ||
+        partner.id == event.detail.receiver_id
+    );
+    if (index >= 0) {
+      result[index] = {
+        id: result[index].id,
+        last_chat: event.detail,
+      };
+    } else {
+      result.push({
+        id:
+          event.detail.sender_id == get(currentUserId)
+            ? event.detail.receiver_id!
+            : event.detail.sender_id,
+        last_chat: event.detail,
+      });
+    }
+
+    return result.toSorted(
+      (a, b) =>
+        new Date(b.last_chat.created_at).getTime() -
+        new Date(a.last_chat.created_at).getTime()
+    );
+  });
 };
 
-const mockContacts: Contact[] = [
-	{ id: 1, name: 'Alice', avatar: 'https://via.placeholder.com/150/FF0000/FFFFFF?text=A', lastMessage: 'OK, sampai jumpa!' },
-	{ id: 2, name: 'Bob', avatar: 'https://via.placeholder.com/150/00FF00/FFFFFF?text=B', lastMessage: 'Kamu di mana?' },
-	{ id: 3, name: 'Charlie', avatar: 'https://via.placeholder.com/150/0000FF/FFFFFF?text=C', lastMessage: 'Jangan lupa...' }
-];
+sessionStore.subscribe(async (session) => {
+  chatWsStore.update((chat) => {
+    if (chat) {
+      chat.removeEventListener("receive-chat", onReceiveChat);
+      chat.ws.close();
+    }
+    return null;
+  });
 
-const mockMessages: AllMessages = {
-	1: [
-		{ id: 1, text: 'Hei, apa kabar?', sender: 'alice', time: '10:30' },
-		{ id:2, text: 'Baik! Kamu?', sender: 'me', time: '10:31' },
-		{ id: 3, text: 'OK, sampai jumpa!', sender: 'alice', time: '10:32' }
-	],
-	2: [{ id: 1, text: 'Kamu di mana?', sender: 'bob', time: '11:00' }],
-    3: [{ id: 1, text: 'Jangan lupa...', sender: 'charlie', time: '15:20' }]
-};
+  if (!session) {
+    chatPartnersStore.set([]);
+    return;
+  }
 
-export const contacts = writable<Contact[]>(mockContacts);
-const allMessages = writable<AllMessages>(mockMessages);
-const activeContactId = writable<number | null>(null);
+  const chatPartners = await session.getChatPartners();
+  chatPartnersStore.set(chatPartners);
 
-export const activeContact = derived(
-	[contacts, activeContactId],
-	([$contacts, $activeContactId]): Contact | null => {
-		if (!$activeContactId) return null;
-		return $contacts.find(c => c.id === $activeContactId) || null;
-	}
-);
+  const chatWs = await session.createChatWs();
+  chatWs.addEventListener("receive-chat", onReceiveChat);
+  chatWsStore.set(chatWs);
+});
 
-export const activeMessages = derived(
-	[allMessages, activeContactId],
-	([$allMessages, $activeContactId]): Message[] => {
-		if (!$activeContactId) return []; 
-		return $allMessages[$activeContactId] || [];
-	}
-);
+derived([sessionStore, activeContactId], ([session, activeContactId]) => ({
+  session,
+  activeContactId,
+})).subscribe(async ({ session, activeContactId }) => {
+  if (!session) {
+    activeMessages.set([]);
+    return;
+  }
 
-export function selectContact(id: number) {
-	activeContactId.set(id);
+  const chats = await session.getChats();
+  activeMessages.set(chats);
+});
+
+export function selectContact(id: string) {
+  activeContactId.set(id);
 }

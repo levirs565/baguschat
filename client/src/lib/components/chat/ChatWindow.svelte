@@ -1,9 +1,10 @@
 <script lang="ts">
 	import MessageInput from './MessageInput.svelte';
 	import MessageBubble from './MessageBubble.svelte';
-	import { activeMessages, activeContact } from '$lib/stores/chatStore';
+	import { activeMessages, activeContactId } from '$lib/stores/chatStore';
 	import { Avatar, Heading } from 'flowbite-svelte';
 	import { afterUpdate } from 'svelte';
+  import { createUserDataQueryOptions } from '$lib/queries/user';
 
 	let feedContainer: HTMLDivElement;
 
@@ -12,12 +13,13 @@
 			feedContainer.scrollTop = feedContainer.scrollHeight;
 		}
 	});
+
 </script>
 
-{#if $activeContact}
+{#if $activeContactId}
 	<div class="flex items-center p-4 border-b dark:border-gray-700 bg-white dark:bg-gray-800">
-		<Avatar src={$activeContact.avatar} class="mr-3" />
-		<Heading tag="h5">{$activeContact.name}</Heading>
+		<Avatar src={""} class="mr-3" />
+		<Heading tag="h5">{""}</Heading>
 	</div>
 
 	<div

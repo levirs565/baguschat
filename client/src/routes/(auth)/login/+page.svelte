@@ -1,16 +1,26 @@
 <script>
   import { Card, Button, Label, Input, Heading } from "flowbite-svelte";
+  import { sessionStore } from "$lib/stores/sessionStore";
+  import { createCurrentUserQueryOptions } from "$lib/queries/user";
+  import { createQuery } from "@tanstack/svelte-query";
   import { goto } from "$app/navigation";
-  import { authStore } from "$lib/stores/authStore.js";
 
   let username = "";
   let password = "";
 
-  function handleLogin() {
-    console.log("Mencoba login dengan:", { username, password });
-    authStore.login(username);
-    goto("/chat");
+  async function handleLogin() {
+    await sessionStore.login(username, password);
   }
+
+  
+  const userQueryOptions = createCurrentUserQueryOptions();
+  const user = createQuery(() => $userQueryOptions);
+
+  $effect(() => {
+    if (user.data) {
+      goto("/chat")
+    }
+  })
 </script>
 
 <svelte:head>

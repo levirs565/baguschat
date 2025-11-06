@@ -1,6 +1,6 @@
 <script>
 	import { Listgroup } from 'flowbite-svelte';
-	import { contacts } from '$lib/stores/chatStore';
+	import { chatPartnersStore } from '$lib/stores/chatStore';
 	import ContactItem from './ContactItem.svelte';
 	import ProfileButton from '../common/ProfileButton.svelte';
 	import SettingsButton from '../common/SettingsButton.svelte';
@@ -18,7 +18,7 @@
 
 	<div class="flex-1 overflow-y-auto">
 		<Listgroup class="border-none">
-			{#each $contacts as contact (contact.id)}
+			{#each $chatPartnersStore as contact (contact.id)}
 				<ContactItem {contact} />
 			{/each}
 		</Listgroup>

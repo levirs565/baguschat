@@ -24,13 +24,13 @@ pub enum ConversationType {
     Image,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Clone, Copy)]
 enum FileChatType {
     File,
     Image,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Clone)]
 #[serde(tag = "type")]
 enum ChatContent {
     Text {
@@ -46,7 +46,7 @@ enum ChatContent {
     },
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Clone)]
 struct ChatItem {
     id: Uuid,
     created_at: chrono::NaiveDateTime,
@@ -436,7 +436,7 @@ struct Disconnect {
     user_id: Uuid,
 }
 
-#[derive(Message)]
+#[derive(Message, Clone)]
 #[rtype(result = "()")]
 struct RouteChat {
     chat_item: ChatItem,
@@ -478,6 +478,9 @@ impl Handler<RouteChat> for ChatRouter {
     type Result = ();
 
     fn handle(&mut self, msg: RouteChat, _: &mut Self::Context) -> Self::Result {
+        if let Some(addr) = self.sessions.get(&msg.chat_item.sender_id) {
+            addr.do_send(msg.clone());
+        }
         if let Some(receiver_id) = msg.chat_item.receiver_id {
             if let Some(addr) = self.sessions.get(&receiver_id) {
                 addr.do_send(msg);
