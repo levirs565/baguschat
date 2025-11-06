@@ -289,6 +289,12 @@ class ClientSession {
     );
   }
 
+  async getChats() {
+    return Promise.all((await api.getChats()).map(
+      this.#cryptoService.decryptChat.bind(this.#cryptoService)
+    ));
+  }
+
   async createChatWs(): Promise<ChatWs> {
     return new Promise((resolve, reject) => {
       const ws = new WebSocket(`${this.#apiService.baseUrl}/chat/ws`);
@@ -432,7 +438,7 @@ class ChatWs extends TypedEventTarget<ChatWsEventMap> {
     this.ws.send(JSON.stringify(request));
   }
 
-  async sendChat(receiverId: string, message: string) {
+  async sendText(receiverId: string, message: string) {
     this.sendWsRequest({
       type: "SendChat",
       ...(await this.#cryptoservice.getChatData(receiverId, message)),
@@ -449,7 +455,7 @@ class ChatWs extends TypedEventTarget<ChatWsEventMap> {
           this.dispatchTypedEvent(
             "receive-chat",
             new CustomEvent("receive-chat", {
-              detail: chat
+              detail: chat,
             })
           );
         }
@@ -461,7 +467,9 @@ class ChatWs extends TypedEventTarget<ChatWsEventMap> {
 }
 
 async function runChatWsTest() {
-  const ws = (await (await client.createClientSession(undefined))?.createChatWs())!;
+  const ws = (await (
+    await client.createClientSession(undefined)
+  )?.createChatWs())!;
   ws.addEventListener("receive-chat", (e) => {
     console.log(e.detail.message);
   });
