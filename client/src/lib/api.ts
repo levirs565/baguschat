@@ -29,6 +29,7 @@ import {
 import { getUserPrivateKey, putUserPrivateKey } from "./db";
 import { TypedEventTarget } from "typescript-event-target";
 import { blake2b } from "blakejs";
+import { PUBLIC_API_ROOT } from '$env/static/public'
 
 const srpClient = createSRPClient(
   {
@@ -147,7 +148,7 @@ export interface FileChatDownloadResponse {
 export class APIService {
   instance: AxiosInstance;
   baseUrl: string;
-  constructor(apiUrl: string = "http://localhost:8080") {
+  constructor(apiUrl: string = PUBLIC_API_ROOT) {
     this.baseUrl = apiUrl;
     this.instance = axios.create({
       baseURL: apiUrl,
