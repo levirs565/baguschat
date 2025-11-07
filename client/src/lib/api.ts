@@ -28,8 +28,19 @@ import {
 } from "./crypto";
 import { getUserPrivateKey, putUserPrivateKey } from "./db";
 import { TypedEventTarget } from "typescript-event-target";
+import { blake2b } from "blakejs";
 
-const srpClient = createSRPClient("SHA-256", 2048);
+const srpClient = createSRPClient(
+  {
+    bytesLength: 64,
+    hash(data) {
+      return Promise.resolve(
+        typedArrayToBuffer(blake2b(new Uint8Array(data)))
+      );
+    },
+  },
+  2048
+);
 
 export interface SignupRequest {
   username: string;
@@ -418,7 +429,7 @@ export class ClientSession {
   async downloadChatFile(chat_id: string, key: ArrayBuffer) {
     const url = await this.apiService.downloadFileChat(chat_id);
     const file = await (await fetch(url.presigned_url)).arrayBuffer();
-    return decryptXcacha20(new Uint8Array(key), new Uint8Array(file))
+    return decryptXcacha20(new Uint8Array(key), new Uint8Array(file));
   }
 }
 

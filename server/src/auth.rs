@@ -3,6 +3,7 @@ use crate::utils::base64_field;
 use actix_session::Session;
 use actix_web::Scope;
 use actix_web::{get, post, web};
+use blake2::Blake2b512;
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
 use sha2::Sha256;
@@ -120,7 +121,7 @@ async fn srp_hello(
         .fetch_one(&data.db_pool)
         .await
         .map_err(|_| AppError::UserNotFound)?;
-        let srp = SrpServer::<Sha256>::new(&G_2048);
+        let srp = SrpServer::<Blake2b512>::new(&G_2048);
         let mut b = [0u8; 64];
         rand::rng().fill_bytes(&mut b);
         let b_pub = srp.compute_public_ephemeral(&b, &data.srp_verifier);
@@ -175,7 +176,7 @@ async fn srp_auth(
             .map_err(|_| AppError::SRPNotStarted)?
             .ok_or(AppError::SRPNotStarted)?;
 
-        let srp = SrpServer::<Sha256>::new(&G_2048);
+        let srp = SrpServer::<Blake2b512>::new(&G_2048);
         let verifier = srp
             .process_reply_rfc5054(
                 srp_session.username.as_bytes(),
