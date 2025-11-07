@@ -36,7 +36,6 @@ export function extractEOFMessage(blob: Uint8Array) {
 
   for (let i = blob.byteLength - MARKER.byteLength; i >= 0; i--) {
     const subarray = blob.subarray(i, i + MARKER.byteLength);
-    console.log(new TextDecoder().decode(subarray), i, i + MARKER.byteLength, blob.byteLength);
     if (isEqual(subarray, MARKER)) {
       return new TextDecoder().decode(blob.subarray(i + MARKER.byteLength));
     }
