@@ -5,9 +5,10 @@ use actix_cors::Cors;
 use actix_session::{storage::RedisSessionStore, SessionMiddleware};
 use actix_web::cookie::Key;
 use actix_web::middleware::ErrorHandlers;
-use actix_web::web::JsonConfig;
+use actix_web::web::{JsonConfig, ServiceConfig};
 use actix_web::{web, App, HttpServer};
 use aws_sdk_s3::Config;
+use shuttle_actix_web::ShuttleActixWeb;
 use sqlx::postgres::PgPoolOptions;
 
 use crate::chat::ChatRouter;
@@ -18,8 +19,8 @@ mod core;
 mod user;
 mod utils;
 
-#[actix_web::main]
-async fn main() -> std::io::Result<()> {
+#[shuttle_runtime::main]
+async fn main() -> ShuttleActixWeb<impl FnOnce(&mut ServiceConfig) + Send + Clone + 'static> {
     if let Err(e) = dotenvy::dotenv() {
         eprintln!("Warning: fail to load .env: {e:?}")
     }
@@ -56,42 +57,46 @@ async fn main() -> std::io::Result<()> {
 
     let chat_router = web::Data::new(ChatRouter::default().start());
 
-    HttpServer::new(move || {
+    let factory = move |cfg: &mut ServiceConfig| {
         let cors = Cors::default()
             .allowed_origin(&cors_origin)
             .allow_any_method()
             .allow_any_header()
             .supports_credentials()
             .max_age(3600);
-        App::new()
-            .wrap(cors)
-            .wrap(
-                ErrorHandlers::default()
-                    .handler(actix_web::http::StatusCode::NOT_FOUND, global_error_handler)
-                    .handler(
-                        actix_web::http::StatusCode::INTERNAL_SERVER_ERROR,
-                        global_error_handler,
+        cfg.service(
+            web::scope("")
+                .wrap(cors)
+                .wrap(
+                    ErrorHandlers::default()
+                        .handler(actix_web::http::StatusCode::NOT_FOUND, global_error_handler)
+                        .handler(
+                            actix_web::http::StatusCode::INTERNAL_SERVER_ERROR,
+                            global_error_handler,
+                        )
+                        .default_handler(global_error_handler),
+                )
+                .app_data(JsonConfig::default().error_handler(|err, _| {
+                    AppError::BadRequest {
+                        message: format!("{}", err),
+                    }
+                    .into()
+                }))
+                .wrap(
+                    SessionMiddleware::builder(
+                        redis_store.clone(),
+                        Key::from(session_key.as_bytes()),
                     )
-                    .default_handler(global_error_handler),
-            )
-            .app_data(JsonConfig::default().error_handler(|err, _| {
-                AppError::BadRequest {
-                    message: format!("{}", err),
-                }
-                .into()
-            }))
-            .wrap(
-                SessionMiddleware::builder(redis_store.clone(), Key::from(session_key.as_bytes()))
                     .cookie_secure(true)
                     .build(),
-            )
-            .app_data(app_data.clone())
-            .app_data(chat_router.clone())
-            .service(crate::auth::scope())
-            .service(crate::user::scope())
-            .service(crate::chat::scope())
-    })
-    .bind(("127.0.0.1", 8080))?
-    .run()
-    .await
+                )
+                .app_data(app_data.clone())
+                .app_data(chat_router.clone())
+                .service(crate::auth::scope())
+                .service(crate::user::scope())
+                .service(crate::chat::scope()),
+        );
+    };
+
+    Ok(factory.into())
 }
