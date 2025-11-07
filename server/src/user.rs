@@ -3,7 +3,7 @@ use actix_web::{get, web, Scope};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::auth::guard_auth;
+use crate::auth::{get_userid, guard_auth};
 use crate::core::{AppError, AppResponse, AppState};
 use crate::utils::base64_field;
 
@@ -57,11 +57,13 @@ async fn get_list(
     AppResponse::wrap_async(|| async {
         guard_auth(&session, true)?;
 
+        let current_userid = get_userid(&session).unwrap();
         let filter = format!("{}%", info.username);
 
         let data = sqlx::query!(
-            "SELECT id, username, public_key FROM Users WHERE username LIKE $1",
-            filter
+            "SELECT id, username, public_key FROM Users WHERE username LIKE $1 AND id <> $2",
+            filter,
+            current_userid
         )
         .fetch_all(&data.db_pool)
         .await
