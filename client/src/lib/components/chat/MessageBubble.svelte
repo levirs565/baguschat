@@ -4,12 +4,33 @@
   import { currentUserId, sessionStore } from "$lib/stores/sessionStore";
   import { Button, Spinner } from "flowbite-svelte";
   import { DownloadSolid, FileSolid } from "flowbite-svelte-icons";
+  import { onMount } from "svelte";
 
   let { message }: { message: DecryptedChat2 } = $props();
 
   let isMe = message.sender_id == $currentUserId;
 
   let isDownloadFile = $state(false);
+
+  let imgSrc = $state("");
+
+  onMount(() => {
+    if (imgSrc) {
+      URL.revokeObjectURL(imgSrc);
+    }
+
+    if (message.type != "File") return;
+    if (message.file_type != "Image") return;
+    const store = $sessionStore;
+    const msg = message;
+    (async () => {
+      const buffer = await store!.downloadChatFile(msg.id, msg.key);
+      const blob = new Blob([new Uint8Array(buffer)]);
+      const blobUrl = URL.createObjectURL(blob);
+
+      imgSrc = blobUrl;
+    })();
+  });
 
   async function downloadFile() {
     if (message.type == "Text") return;
@@ -49,10 +70,14 @@
       <p class="text-sm">{message.message}</p>
     {/if}
     {#if message.type == "File"}
-      <div class="flex justify-center">
-        <FileSolid class="w-12 h-12 mb-2" />
-      </div>
-      <p class="text-center text-sm">{message.size}, {message.filename}</p>
+      {#if message.file_type == "File"}
+        <div class="flex justify-center">
+          <FileSolid class="w-12 h-12 mb-2" />
+        </div>
+        <p class="text-center text-sm">{message.size}, {message.filename}</p>
+      {:else}
+        <img src={imgSrc} class="max-w-64 max-h-64 mb-2" />
+      {/if}
       <p class="text-center">
         {#if message.uploaed}
           <Button

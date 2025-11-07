@@ -12,6 +12,8 @@
   import type { CryptoService } from "$lib/api";
   import { toBase64 } from "@smithy/util-base64";
   import { encryptXcacha20 } from "$lib/crypto";
+  import { ImageOutline } from "flowbite-svelte-icons";
+  import Compressor from "@uppy/compressor";
 
   let messageText = "";
 
@@ -32,6 +34,7 @@
   }
 
   let fileInput: HTMLInputElement;
+  let imageInput: HTMLInputElement;
 
   type FileMeta = Awaited<ReturnType<CryptoService["prepareFileKey"]>>;
   const uppy = new Uppy({
@@ -49,25 +52,39 @@
     });
   }
 
-  onMount(() => {
-    uppy.addPreProcessor(async (fileIds, uploadIds) => {
-      for await (const fileId of fileIds) {
-        const file = uppy.getFile(fileId);
-        const meta = file.meta as any as FileMeta;
-        if (!(file.data instanceof Blob || file.data instanceof File))
-          throw new Error("Unsupported");
-        const bytes = new Uint8Array(await file.data.arrayBuffer());
-        const encrypted = encryptXcacha20(meta.plain_key, bytes);
-        const blob = new Blob([encrypted]);
+  const encryptPreprocessor = async (fileIds: string[], uploadIds: string) => {
+    for await (const fileId of fileIds) {
+      const file = uppy.getFile(fileId);
+      const meta = file.meta as any as FileMeta;
+      if (!(file.data instanceof Blob || file.data instanceof File))
+        throw new Error("Unsupported");
+      const bytes = new Uint8Array(await file.data.arrayBuffer());
+      const encrypted = encryptXcacha20(meta.plain_key, bytes);
+      const blob = new Blob([encrypted]);
 
-        uppy.setFileState(fileId, {
-          type: file.type,
-          name: file.name,
-          data: blob,
-          size: blob.size,
-        });
-      }
+      uppy.setFileState(fileId, {
+        type: file.type,
+        name: file.name,
+        data: blob,
+        size: blob.size,
+      });
+    }
+  };
+
+  const installCompressor = () => {
+    uppy.use(Compressor, {
+      maxHeight: 1000,
+      maxWidth: 1000,
+      quality: 0.8,
     });
+  };
+
+  const uninstallCompressor = () => {
+    const plugin = uppy.getPlugin("Compressor");
+    if (plugin) uppy.removePlugin(plugin);
+  };
+
+  onMount(() => {
     uppy.use(AwsS3, {
       limit: 1,
       shouldUseMultipart(file) {
@@ -77,7 +94,7 @@
       async getUploadParameters(file, options): Promise<AwsS3UploadParameters> {
         const meta = file.meta as any as FileMeta;
         const parameters = await $sessionStore?.apiService.startFileChatUpload({
-          file_type: "File",
+          file_type: (file.meta as any).mode,
           receiver_key: meta.receiver_key,
           sender_key: meta.sender_key,
           filename: file.name,
@@ -101,8 +118,15 @@
       },
     });
 
-    fileInput.addEventListener("change", (event) => {
+    const onFileChange = (event: Event) => {
       const files = Array.from((event.target as HTMLInputElement).files ?? []);
+      const mode = event.target == fileInput ? "File" : "Image";
+
+      uppy.removePreProcessor(encryptPreprocessor);
+      uninstallCompressor();
+
+      if (mode == "Image") installCompressor();
+      uppy.addPreProcessor(encryptPreprocessor);
 
       files.forEach((file) => {
         try {
@@ -111,6 +135,9 @@
             name: file.name,
             type: file.type,
             data: file,
+            meta: {
+              mode: mode,
+            },
           });
         } catch (err: any) {
           if (err.isRestriction) {
@@ -120,7 +147,10 @@
           }
         }
       });
-    });
+    };
+
+    fileInput.addEventListener("change", onFileChange);
+    imageInput.addEventListener("change", onFileChange);
 
     uppy.on("file-removed", onFileRemoved);
     uppy.on("upload-success", onFileUploaded as any);
@@ -151,8 +181,18 @@
       <PaperClipOutline class="w-6 h-6" />
     </Button>
 
-    <Button color="alternative" class="mr-2 p-2">
-      <CameraPhotoOutline class="w-6 h-6" />
+    <input
+      type="file"
+      accept="image/png,image/jpeg"
+      class="hidden"
+      bind:this={imageInput}
+    />
+    <Button
+      color="alternative"
+      class="mr-2 p-2"
+      onclick={() => imageInput.click()}
+    >
+      <ImageOutline class="w-6 h-6" />
     </Button>
 
     <div class="relative flex-1" on:keydown={handleKeydown}>

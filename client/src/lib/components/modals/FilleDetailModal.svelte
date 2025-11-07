@@ -9,16 +9,30 @@
   let { uppy }: { uppy: Uppy } = $props();
 
   let isOpen = $state(false);
+  let mode = $state("file");
   let fileName = $state("");
   let fileSize = $state("");
   let lastFileId = $state<string>();
   let isUploading = $state<boolean>();
+  let imageUrl = $state("");
 
   function onFileAdded(file: UppyFile<any, any>) {
+    mode = file.meta.mode;
     isOpen = true;
     fileName = file.name ?? "";
     fileSize = `${file.size}`;
     lastFileId = file.id;
+    if (mode == "Image") {
+      if (file.data instanceof Blob || file.data instanceof File)
+        imageUrl = URL.createObjectURL(file.data);
+    }
+  }
+
+  function cleanImageUrl() {
+    if (imageUrl) {
+      URL.revokeObjectURL(imageUrl);
+      imageUrl = "";
+    }
   }
 
   function onClose() {
@@ -35,6 +49,7 @@
     ) {
       if (lastFileId) uppy.removeFile(lastFileId);
       lastFileId = "";
+      cleanImageUrl();
       return true;
     }
 
@@ -55,9 +70,10 @@
   }
 
   function onFileUploaded() {
+    cleanImageUrl();
     isOpen = false;
     isUploading = false;
-  } 
+  }
 
   function onFailUpload() {
     isUploading = false;
@@ -66,12 +82,12 @@
   onMount(() => {
     uppy.on("file-added", onFileAdded);
     uppy.on("upload-success", onFileUploaded as any);
-    uppy.on("upload-error", onFailUpload)
+    uppy.on("upload-error", onFailUpload);
   });
   onDestroy(() => {
     uppy.off("file-added", onFileAdded);
     uppy.off("upload-success", onFileUploaded as any);
-    uppy.off("upload-error", onFailUpload)
+    uppy.off("upload-error", onFailUpload);
   });
 </script>
 
@@ -83,10 +99,17 @@
   onaction={onSubmit}
   outsideclose={false}
 >
-  <div class="flex justify-center"><FileSolid class=" w-16 h-16" /></div>
+  <div class="flex justify-center">
+    {#if mode == "File"}
+      <FileSolid class=" w-16 h-16" />
+    {:else}
+      <img src={imageUrl} class="max-w-64 max-h-64" />
+    {/if}
+  </div>
+
   <P class="text-center">{fileSize}, {fileName}</P>
   {#snippet footer()}
     <Button disabled={isUploading} type="submit" value="send">Kirim</Button>
-    <Button disabled={isUploading} type="submit" value="cancel">Batal</Button>
+    <Button color="dark" disabled={isUploading} type="submit" value="cancel">Batal</Button>
   {/snippet}
 </Modal>
