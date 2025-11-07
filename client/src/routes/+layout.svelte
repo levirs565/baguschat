@@ -20,24 +20,8 @@
 
   let { children } = $props();
 
-	import { authStore } from '$lib/stores/authStore.js';
-	import { page } from '$app/stores';
-	import { goto } from '$app/navigation';
-  import { queryClient } from "$lib/queries/core.js";
-  import { createCurrentUserQueryOptions } from "$lib/queries/user.js";
+	import { queryClient } from "$lib/queries/core.js";
   
-	// authStore.subscribe((storeData) => {
-  //   const isAuthRoute = $page.url.pathname.startsWith('/(auth)');
-	// 	const isChatRoute = $page.url.pathname === '/chat';
-    
-	// 	if (!storeData.user && isChatRoute) {
-  //     goto('/login');
-	// 	}
-    
-	// 	if (storeData.user && isAuthRoute) {
-  //     goto('/chat');
-	// 	}
-	// });
 </script>
 
 <svelte:head>

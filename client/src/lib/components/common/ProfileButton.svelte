@@ -6,7 +6,6 @@
 <button
 	type="button"
 	class="flex items-center cursor-pointer"
-	on:click={() => isProfileModalOpen.set(true)}
 	aria-label="Buka pengaturan profil"
 >
 	<Avatar src="" />
