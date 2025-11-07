@@ -9,18 +9,21 @@
   let password = "";
 
   async function handleLogin() {
-    await sessionStore.login(username, password);
+    try {
+      await sessionStore.login(username, password);
+    } catch (e) {
+      alert(JSON.stringify(e));
+    }
   }
 
-  
   const userQueryOptions = createCurrentUserQueryOptions();
   const user = createQuery(() => $userQueryOptions);
 
   $effect(() => {
     if (user.data) {
-      goto("/chat")
+      goto("/chat");
     }
-  })
+  });
 </script>
 
 <svelte:head>

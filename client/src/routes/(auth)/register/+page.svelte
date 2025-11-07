@@ -8,6 +8,18 @@
   let confirmPassword = "";
 
   function handleRegister() {
+    if (!/^[a-z]+$/.test(username)) {
+      alert("Username hanya boleh berisi huruf kecil");
+      return;
+    }
+    if (username.length < 4) {
+      alert("Username minimal 4");
+      return;
+    }
+    if (password.length < 8) {
+      alert("Password minimal 8");
+      return;
+    }
     if (password !== confirmPassword) {
       alert("Password tidak cocok!");
       return;
@@ -17,7 +29,7 @@
       .then(() => {
         goto("/login");
       })
-      .catch((e) => alert(e));
+      .catch((e) => alert(JSON.stringify(e)));
   }
 </script>
 
