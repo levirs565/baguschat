@@ -1,9 +1,14 @@
 <script lang="ts">
   import type { DecryptedChat2 } from "$lib/api";
+  import { extractEOFMessage } from "$lib/stegano";
   import type { Message } from "$lib/stores/chatStore";
   import { currentUserId, sessionStore } from "$lib/stores/sessionStore";
-  import { Button, Spinner } from "flowbite-svelte";
-  import { DownloadSolid, FileSolid } from "flowbite-svelte-icons";
+  import { Button, Dropdown, DropdownItem, Spinner } from "flowbite-svelte";
+  import {
+    DotsVerticalOutline,
+    DownloadSolid,
+    FileSolid,
+  } from "flowbite-svelte-icons";
   import { onMount } from "svelte";
 
   let { message }: { message: DecryptedChat2 } = $props();
@@ -13,6 +18,8 @@
   let isDownloadFile = $state(false);
 
   let imgSrc = $state("");
+
+  let decryptedImage: Uint8Array | null = null
 
   onMount(() => {
     if (imgSrc) {
@@ -26,6 +33,7 @@
     (async () => {
       const buffer = await store!.downloadChatFile(msg.id, msg.key);
       const blob = new Blob([new Uint8Array(buffer)]);
+      decryptedImage = buffer
       const blobUrl = URL.createObjectURL(blob);
 
       imgSrc = blobUrl;
@@ -53,6 +61,20 @@
       alert(JSON.stringify(e));
     }
     isDownloadFile = false;
+  }
+
+  function checkSecretMessage() {
+    if (!decryptedImage) {
+      alert("Pesan belum dimuat")
+      return
+    }
+
+    const message = extractEOFMessage(decryptedImage)
+    if (message == null) {
+      alert("Tidak Ada Pesan Rahasia")
+    } else {
+      alert(`Pesan Rahasia: ${message}`)
+    }
   }
 </script>
 
@@ -93,6 +115,14 @@
             {/if}
             Unduh
           </Button>
+          {#if message.file_type == "Image"}
+            <Button class="p-2!" color="dark">
+              <DotsVerticalOutline class="h-6 w-6" />
+            </Button>
+            <Dropdown simple>
+              <DropdownItem onclick={checkSecretMessage}>Lihat Pesan Rahasia</DropdownItem>
+            </Dropdown>
+          {/if}
         {:else}
           Sedang menunggu upload
         {/if}

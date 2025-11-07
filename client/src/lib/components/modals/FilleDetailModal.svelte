@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Button, Modal, P } from "flowbite-svelte";
+  import { Button, Checkbox, Input, Label, Modal, P } from "flowbite-svelte";
   import Uppy, { type UppyFile } from "@uppy/core";
   import { onDestroy, onMount } from "svelte";
   import { FileSolid } from "flowbite-svelte-icons";
@@ -15,6 +15,8 @@
   let lastFileId = $state<string>();
   let isUploading = $state<boolean>();
   let imageUrl = $state("");
+  let addSecret = $state(false);
+  let secretMessage = $state("");
 
   function onFileAdded(file: UppyFile<any, any>) {
     mode = file.meta.mode;
@@ -36,6 +38,8 @@
   }
 
   function onClose() {
+    addSecret = false;
+    secretMessage = "";
     if (!lastFileId) return;
     uppy.removeFile(lastFileId);
   }
@@ -55,6 +59,11 @@
 
     isUploading = true;
     const fileId = lastFileId;
+
+    if (addSecret && mode == "Image")
+      uppy.setFileMeta(fileId, {
+        secretMessage: secretMessage,
+      });
 
     (async () => {
       uppy.setFileMeta(fileId, {
@@ -108,8 +117,24 @@
   </div>
 
   <P class="text-center">{fileSize}, {fileName}</P>
+
+  {#if mode == "Image"}
+    <Checkbox bind:checked={addSecret}>Tambahkan Pesan Rahasia</Checkbox>
+    {#if addSecret}
+      <div>
+        <Label for="secret-message" class="mb-2 block">Pesan Rahasia</Label>
+        <Input
+          bind:value={secretMessage}
+          id="secret-message"
+          placeholder="Masukkan pesan rahasia"
+        />
+      </div>
+    {/if}
+  {/if}
   {#snippet footer()}
     <Button disabled={isUploading} type="submit" value="send">Kirim</Button>
-    <Button color="dark" disabled={isUploading} type="submit" value="cancel">Batal</Button>
+    <Button color="dark" disabled={isUploading} type="submit" value="cancel"
+      >Batal</Button
+    >
   {/snippet}
 </Modal>

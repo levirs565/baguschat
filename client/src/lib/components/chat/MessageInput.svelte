@@ -14,6 +14,7 @@
   import { encryptXcacha20 } from "$lib/crypto";
   import { ImageOutline } from "flowbite-svelte-icons";
   import Compressor from "@uppy/compressor";
+  import { addEOFMessage } from "$lib/stegano";
 
   let messageText = "";
 
@@ -60,6 +61,28 @@
         throw new Error("Unsupported");
       const bytes = new Uint8Array(await file.data.arrayBuffer());
       const encrypted = encryptXcacha20(meta.plain_key, bytes);
+      const blob = new Blob([encrypted]);
+
+      uppy.setFileState(fileId, {
+        type: file.type,
+        name: file.name,
+        data: blob,
+        size: blob.size,
+      });
+    }
+  };
+
+  const steganoPreprocessor = async (fileIds: string[], uploadIds: string) => {
+    for await (const fileId of fileIds) {
+      const file = uppy.getFile(fileId);
+      const meta = file.meta as any;
+
+      if (!meta.secretMessage) continue;
+
+      if (!(file.data instanceof Blob || file.data instanceof File))
+        throw new Error("Unsupported");
+      const bytes = await file.data.arrayBuffer();
+      const encrypted = addEOFMessage(bytes, meta.secretMessage);
       const blob = new Blob([encrypted]);
 
       uppy.setFileState(fileId, {
@@ -123,9 +146,13 @@
       const mode = event.target == fileInput ? "File" : "Image";
 
       uppy.removePreProcessor(encryptPreprocessor);
+      uppy.removePreProcessor(steganoPreprocessor);
       uninstallCompressor();
 
-      if (mode == "Image") installCompressor();
+      if (mode == "Image") {
+        installCompressor();
+        uppy.addPreProcessor(steganoPreprocessor);
+      }
       uppy.addPreProcessor(encryptPreprocessor);
 
       files.forEach((file) => {
