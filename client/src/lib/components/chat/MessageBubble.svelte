@@ -99,16 +99,7 @@
     class:rounded-tl-none={!isMe}
   >
     {#if message.type == "Text"}
-      <p class="text-sm">{message.message}</p>
-
-      <Button class="p-2!" color="dark" size="sm">
-        <DotsVerticalOutline class="h-4 w-4" />
-      </Button>
-      <Dropdown simple>
-        <DropdownItem onclick={checkSecretMessage}
-          >Lihat Pesan Rahasia</DropdownItem
-        >
-      </Dropdown>
+      <p class="text-sm dark:text-white mb-2">{message.message}</p>
     {/if}
     {#if message.type == "File"}
       {#if message.file_type == "File"}
@@ -134,29 +125,34 @@
             {/if}
             Unduh
           </Button>
-          {#if message.file_type == "Image"}
-            <Button class="p-2!" color="dark">
-              <DotsVerticalOutline class="h-6 w-6" />
-            </Button>
-            <Dropdown simple>
-              <DropdownItem onclick={checkSecretMessage}
-                >Lihat Pesan Rahasia</DropdownItem
-              >
-            </Dropdown>
-          {/if}
         {:else}
           Sedang menunggu upload
         {/if}
       </p>
     {/if}
 
-    <p
-      class="text-xs mt-1 text-right"
-      class:text-gray-200={isMe}
-      class:text-gray-400={!isMe}
-    >
-      {message.created_at}
-    </p>
+    <div class="flex flex-row items-center gap-2" class:flex-row-reverse={isMe}>
+      <p
+        class="text-xs mt-1 text-right"
+        class:text-gray-200={isMe}
+        class:text-gray-400={!isMe}
+      >
+        {new Date(message.created_at).toLocaleDateString("id-ID", {
+          hour: "2-digit",
+          minute: "2-digit",
+        })}
+      </p>
+      {#if message.type == "Text" || (message.type == "File" && message.file_type == "Image")}
+        <Button class="p-2!" color="dark" size="sm">
+          <DotsVerticalOutline class="h-4 w-4" />
+        </Button>
+        <Dropdown simple>
+          <DropdownItem onclick={checkSecretMessage}
+            >Lihat Pesan Rahasia</DropdownItem
+          >
+        </Dropdown>
+      {/if}
+    </div>
 
     {#if isMe}
       <div
