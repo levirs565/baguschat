@@ -24,6 +24,7 @@ import {
   importAESGCMKey,
   decryptAESGCM,
   generateXcacha20Key,
+  decryptXcacha20,
 } from "./crypto";
 import { getUserPrivateKey, putUserPrivateKey } from "./db";
 import { TypedEventTarget } from "typescript-event-target";
@@ -130,6 +131,10 @@ export interface FileChatFinishRequest {
   id: string;
 }
 
+export interface FileChatDownloadResponse {
+  presigned_url: string;
+}
+
 export class APIService {
   instance: AxiosInstance;
   baseUrl: string;
@@ -218,6 +223,12 @@ export class APIService {
 
   finishFileChatUpload(data: FileChatFinishRequest) {
     return this.post(`/chat/file-chat/finish`, data);
+  }
+
+  downloadFileChat(chat_id: string) {
+    return this.get<FileChatDownloadResponse>(
+      `/chat/file-chat/download/${chat_id}`
+    );
   }
 }
 
@@ -403,6 +414,12 @@ export class ClientSession {
       });
     });
   }
+
+  async downloadChatFile(chat_id: string, key: ArrayBuffer) {
+    const url = await this.apiService.downloadFileChat(chat_id);
+    const file = await (await fetch(url.presigned_url)).arrayBuffer();
+    return decryptXcacha20(new Uint8Array(key), new Uint8Array(file))
+  }
 }
 
 export type DecryptedChatPartner = Awaited<
@@ -502,7 +519,6 @@ export class CryptoService {
       this.#currentPrivateKey,
       new Uint8Array(encryptedKey)
     );
-    const key = await importAESGCMKey(keyRaw);
     const base = {
       id: other.id,
       created_at: other.created_at,
@@ -510,7 +526,8 @@ export class CryptoService {
       receiver_id: other.receiver_id,
     };
 
-    if (other.type == "Text")
+    if (other.type == "Text") {
+      const key = await importAESGCMKey(keyRaw);
       return {
         ...base,
         type: other.type,
@@ -518,16 +535,17 @@ export class CryptoService {
           await decryptAESGCM(key, fromBase64(other.cipher))
         ),
       };
-    else
+    } else
       return {
         ...base,
         type: other.type,
-        key,
+        key: keyRaw,
         file_type: other.file_type,
         filename: other.filename,
         mime_type: other.mime_type,
         size: other.size,
         path: other.path,
+        uploaed: other.uploaded,
       };
   }
 }

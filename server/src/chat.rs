@@ -299,6 +299,71 @@ async fn file_chat_finish(
 }
 
 #[derive(Serialize)]
+struct FileChatDownloadResponse {
+    presigned_url: String,
+}
+
+#[get("file-chat/download/{id}")]
+async fn download_file_chat(
+    app_data: web::Data<AppState>,
+    session: actix_session::Session,
+    request: web::Path<Uuid>,
+) -> AppResponse<FileChatDownloadResponse> {
+    AppResponse::wrap_async(|| async {
+        guard_auth(&session, true)?;
+
+        let user_id = get_userid(&session).unwrap();
+        let id = request.into_inner();
+
+        let data = sqlx::query!(
+            r#"SELECT 
+                sender_id, receiver_id,
+                contet_type as "contet_type: ConversationType" 
+            FROM conversations WHERE id = $1"#,
+            id
+        )
+        .fetch_one(&app_data.db_pool)
+        .await
+        .map_err(|_| AppError::NotFound)?;
+
+        if data.contet_type == ConversationType::Text {
+            return Err(AppError::BadRequest {
+                message: "Invalid chat type".to_string(),
+            });
+        }
+
+        if !(user_id == data.sender_id || Some(user_id) == data.receiver_id) {
+            return Err(AppError::Forbidden);
+        }
+
+        let file_data = sqlx::query!(
+            "SELECT path, uploaded FROM conversations_file WHERE id = $1",
+            id
+        ).fetch_one(&app_data.db_pool)
+        .await
+        .map_err(|_| AppError::Internal)?;
+
+        if !file_data.uploaded {
+            return Err(AppError::BadRequest { message: "File has not uploaded".to_string() })
+        }
+
+        let output = app_data
+            .s3
+            .get_object()
+            .bucket(app_data.s3_bucket.clone())
+            .key(file_data.path)
+            .presigned(PresigningConfig::expires_in(Duration::from_mins(30)).unwrap())
+            .await
+            .map_err(|_| AppError::Internal)?;
+
+        Ok(FileChatDownloadResponse {
+            presigned_url: output.uri().to_string()
+        })
+    })
+    .await
+}
+
+#[derive(Serialize)]
 struct ChatPartnerItem {
     id: Uuid,
     last_chat: ChatItem,
@@ -691,6 +756,7 @@ pub fn scope() -> Scope {
         .service(get_partners)
         .service(file_chat_start)
         .service(file_chat_finish)
+        .service(download_file_chat)
         .route("ws", web::get().to(ws))
         .service(get)
 }
