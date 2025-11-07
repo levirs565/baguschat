@@ -43,6 +43,9 @@
   type FileMeta = Awaited<ReturnType<CryptoService["prepareFileKey"]>>;
   const uppy = new Uppy({
     autoProceed: false,
+    restrictions: {
+      maxFileSize: 10 * 1024 * 1024
+    }
   });
 
   function onFileRemoved() {
@@ -171,7 +174,7 @@
           });
         } catch (err: any) {
           if (err.isRestriction) {
-            console.log("Restriction error:", err);
+            alert(`Restriction error: ${err.message}`);
           } else {
             console.error(err);
           }
