@@ -44,6 +44,11 @@
   title="Kirim Pesan Rahasia"
   outsideclose={false}
   onaction={onSubmit}
+  onclose={() => {
+    keyA = 1;
+    keyB = 1;
+    message = "";
+  }}
   bind:open={$isSecretChatModalOpen}
 >
   <div class="flex flex-row items-center">

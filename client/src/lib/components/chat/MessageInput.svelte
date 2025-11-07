@@ -12,11 +12,12 @@
   import type { CryptoService } from "$lib/api";
   import { toBase64 } from "@smithy/util-base64";
   import { encryptXcacha20 } from "$lib/crypto";
-  import { ImageOutline } from "flowbite-svelte-icons";
+  import { ImageOutline, LockSolid } from "flowbite-svelte-icons";
   import Compressor from "@uppy/compressor";
   import { addEOFMessage } from "$lib/stegano";
   import SecretMessageModal from "../modals/SecretMessageModal.svelte";
   import { isSecretChatModalOpen } from "$lib/stores/uiStore";
+  import ReadSecretMessageModal from "../modals/ReadSecretMessageModal.svelte";
 
   let messageText = "";
 
@@ -200,6 +201,7 @@
 >
   <FilleDetailModal {uppy} />
   <SecretMessageModal />
+  <ReadSecretMessageModal />
 
   <div class="flex items-center space-x-2">
     <input type="file" class="hidden" bind:this={fileInput} />
@@ -230,7 +232,7 @@
       class="mr-2 p-2"
       onclick={() => isSecretChatModalOpen.set(true)}
     >
-      <ImageOutline class="w-6 h-6" />
+      <LockSolid class="w-6 h-6" />
     </Button>
 
     <div class="relative flex-1" on:keydown={handleKeydown}>

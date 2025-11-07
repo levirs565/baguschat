@@ -3,6 +3,10 @@
   import { extractEOFMessage } from "$lib/stegano";
   import type { Message } from "$lib/stores/chatStore";
   import { currentUserId, sessionStore } from "$lib/stores/sessionStore";
+  import {
+    isReadSecretChatModalOpen,
+    readSecretChatMessage,
+  } from "$lib/stores/uiStore";
   import { Button, Dropdown, DropdownItem, Spinner } from "flowbite-svelte";
   import {
     DotsVerticalOutline,
@@ -19,7 +23,7 @@
 
   let imgSrc = $state("");
 
-  let decryptedImage: Uint8Array | null = null
+  let decryptedImage: Uint8Array | null = null;
 
   onMount(() => {
     if (imgSrc) {
@@ -33,7 +37,7 @@
     (async () => {
       const buffer = await store!.downloadChatFile(msg.id, msg.key);
       const blob = new Blob([new Uint8Array(buffer)]);
-      decryptedImage = buffer
+      decryptedImage = buffer;
       const blobUrl = URL.createObjectURL(blob);
 
       imgSrc = blobUrl;
@@ -64,16 +68,22 @@
   }
 
   function checkSecretMessage() {
-    if (!decryptedImage) {
-      alert("Pesan belum dimuat")
-      return
+    if (message.type == "Text") {
+      readSecretChatMessage.set(message.message);
+      isReadSecretChatModalOpen.set(true);
+      return;
     }
 
-    const message = extractEOFMessage(decryptedImage)
-    if (message == null) {
-      alert("Tidak Ada Pesan Rahasia")
+    if (!decryptedImage) {
+      alert("Pesan belum dimuat");
+      return;
+    }
+
+    const secretMessage = extractEOFMessage(decryptedImage);
+    if (secretMessage == null) {
+      alert("Tidak Ada Pesan Rahasia");
     } else {
-      alert(`Pesan Rahasia: ${message}`)
+      alert(`Pesan Rahasia: ${secretMessage}`);
     }
   }
 </script>
@@ -90,6 +100,15 @@
   >
     {#if message.type == "Text"}
       <p class="text-sm">{message.message}</p>
+
+      <Button class="p-2!" color="dark" size="sm">
+        <DotsVerticalOutline class="h-4 w-4" />
+      </Button>
+      <Dropdown simple>
+        <DropdownItem onclick={checkSecretMessage}
+          >Lihat Pesan Rahasia</DropdownItem
+        >
+      </Dropdown>
     {/if}
     {#if message.type == "File"}
       {#if message.file_type == "File"}
@@ -120,7 +139,9 @@
               <DotsVerticalOutline class="h-6 w-6" />
             </Button>
             <Dropdown simple>
-              <DropdownItem onclick={checkSecretMessage}>Lihat Pesan Rahasia</DropdownItem>
+              <DropdownItem onclick={checkSecretMessage}
+                >Lihat Pesan Rahasia</DropdownItem
+              >
             </Dropdown>
           {/if}
         {:else}
