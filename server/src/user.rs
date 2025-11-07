@@ -27,7 +27,7 @@ async fn get(
         let user_id = path.into_inner();
 
         let data = sqlx::query!(
-            "SELECT username, public_key FROM Users WHERE id = $1 LIMIT 5",
+            "SELECT username, public_key FROM users WHERE id = $1 LIMIT 5",
             user_id
         )
         .fetch_one(&data.db_pool)
@@ -61,7 +61,7 @@ async fn get_list(
         let filter = format!("{}%", info.username);
 
         let data = sqlx::query!(
-            "SELECT id, username, public_key FROM Users WHERE username LIKE $1 AND id <> $2",
+            "SELECT id, username, public_key FROM users WHERE username LIKE $1 AND id <> $2",
             filter,
             current_userid
         )

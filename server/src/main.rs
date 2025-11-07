@@ -28,6 +28,7 @@ async fn main() -> std::io::Result<()> {
     let redis_url = env::var("REDIS_URL").expect("REDIS_URL is not set");
     let session_key = env::var("SESSION_KEY").expect("SESSION_KEY is not set");
     let s3_bucket = env::var("S3_BUCKET").expect("S3_BUCKET is not set");
+    let cors_origin = env::var("CORS_ORIGIN").expect("CORS_ORIGIN is not set");
 
     println!("Connecting to database..");
     let pool = PgPoolOptions::new()
@@ -45,7 +46,6 @@ async fn main() -> std::io::Result<()> {
     let s3_config = (&s3_config).to_builder().force_path_style(true).build();
     let s3_client = aws_sdk_s3::Client::from_conf(s3_config);
 
-
     let app_data = web::Data::new(AppState {
         db_pool: pool,
         s3: s3_client,
@@ -58,7 +58,7 @@ async fn main() -> std::io::Result<()> {
 
     HttpServer::new(move || {
         let cors = Cors::default()
-            .allowed_origin("http://localhost:5173")
+            .allowed_origin(&cors_origin)
             .allow_any_method()
             .allow_any_header()
             .supports_credentials()

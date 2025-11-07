@@ -43,7 +43,7 @@ async fn signup(
         if let Err(e) = sqlx::query!(
             r#"
         INSERT INTO 
-            Users(username, srp_salt, srp_verifier, public_key, private_key_encrypted)
+            users(username, srp_salt, srp_verifier, public_key, private_key_encrypted)
         VALUES ($1, $2, $3, $4, $5)
         "#,
             request.username,
@@ -114,7 +114,7 @@ async fn srp_hello(
 
         let data = sqlx::query!(
             r"
-            SELECT id, srp_salt, srp_verifier FROM Users WHERE username = $1
+            SELECT id, srp_salt, srp_verifier FROM users WHERE username = $1
         ",
             request.username
         )
@@ -234,7 +234,7 @@ async fn get_state(session: Session, data: web::Data<AppState>) -> AppResponse<G
         match get_userid(&session) {
             None => Ok(GetStateResponse { user: None }),
             Some(user_id) => {
-                let data = sqlx::query!("SELECT username FROM Users WHERE id = $1", user_id)
+                let data = sqlx::query!("SELECT username FROM users WHERE id = $1", user_id)
                     .fetch_one(&data.db_pool)
                     .await
                     .map_err(|_| AppError::Internal)?;
@@ -265,7 +265,7 @@ async fn get_keys(session: Session, data: web::Data<AppState>) -> AppResponse<Ge
         let user_id = get_userid(&session).unwrap();
 
         let data = sqlx::query!(
-            "SELECT private_key_encrypted, public_key FROM Users WHERE id = $1",
+            "SELECT private_key_encrypted, public_key FROM users WHERE id = $1",
             user_id
         )
         .fetch_one(&data.db_pool)
