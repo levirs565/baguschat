@@ -162,6 +162,7 @@ const FILE_SIZE_LIMIT: i64 = 1024 * 1024 * 10;
 #[post("file-chat/start")]
 async fn file_chat_start(
     app_data: web::Data<AppState>,
+    chat_router: web::Data<Addr<ChatRouter>>,
     request: web::Json<FileStartUploadRequest>,
     session: actix_session::Session,
 ) -> AppResponse<FileStartUploadResponse> {
@@ -235,11 +236,28 @@ async fn file_chat_start(
             .s3
             .put_object()
             .bucket(app_data.s3_bucket.clone())
-            .key(path)
+            .key(path.clone())
             .content_length(request.enrypted_size)
             .presigned(PresigningConfig::expires_in(Duration::from_mins(30)).unwrap())
             .await
             .map_err(|_| AppError::Internal)?;
+
+        chat_router.do_send(RouteChat::NewChat(ChatItem {
+            id: data.id,
+            created_at: data.created_at,
+            sender_id,
+            receiver_id: Some(request.receiver_id),
+            sender_key: request.sender_key.clone(),
+            receiver_key: request.receiver_key.clone(),
+            content: ChatContent::File {
+                file_type: request.file_type,
+                filename: request.filename.clone(),
+                mime_type: request.mime_type.clone(),
+                size: request.size,
+                path: path.clone(),
+                uploaded: false,
+            },
+        }));
 
         Ok(FileStartUploadResponse {
             id: data.id,
@@ -257,6 +275,7 @@ struct FileChatFinishRequest {
 #[post("file-chat/finish")]
 async fn file_chat_finish(
     app_data: web::Data<AppState>,
+    chat_router: web::Data<Addr<ChatRouter>>,
     session: actix_session::Session,
     request: web::Json<FileChatFinishRequest>,
 ) -> AppResponse<ActionResult> {
@@ -267,7 +286,7 @@ async fn file_chat_finish(
 
         let data = sqlx::query!(
             r#"SELECT 
-                sender_id, contet_type as "contet_type: ConversationType" 
+                sender_id, receiver_id, contet_type as "contet_type: ConversationType" 
             FROM conversations WHERE id = $1"#,
             request.id
         )
@@ -292,6 +311,12 @@ async fn file_chat_finish(
         .execute(&app_data.db_pool)
         .await
         .map_err(|_| AppError::Internal)?;
+
+        chat_router.do_send(RouteChat::FileUploaded {
+            sender_id: data.sender_id,
+            receiver_id: data.receiver_id,
+            chat_id: request.id,
+        });
 
         Ok(ActionResult::success())
     })
@@ -339,12 +364,15 @@ async fn download_file_chat(
         let file_data = sqlx::query!(
             "SELECT path, uploaded FROM conversations_file WHERE id = $1",
             id
-        ).fetch_one(&app_data.db_pool)
+        )
+        .fetch_one(&app_data.db_pool)
         .await
         .map_err(|_| AppError::Internal)?;
 
         if !file_data.uploaded {
-            return Err(AppError::BadRequest { message: "File has not uploaded".to_string() })
+            return Err(AppError::BadRequest {
+                message: "File has not uploaded".to_string(),
+            });
         }
 
         let output = app_data
@@ -357,7 +385,7 @@ async fn download_file_chat(
             .map_err(|_| AppError::Internal)?;
 
         Ok(FileChatDownloadResponse {
-            presigned_url: output.uri().to_string()
+            presigned_url: output.uri().to_string(),
         })
     })
     .await
@@ -474,7 +502,14 @@ enum WsRequestMessage {
 #[derive(Serialize)]
 #[serde(tag = "type")]
 enum WsReponseMessage {
-    ReceiveChat { chat: ChatItem },
+    ReceiveChat {
+        chat: ChatItem,
+    },
+    ChatFileUploaded {
+        sender_id: Uuid,
+        receiver_id: Option<Uuid>,
+        chat_id: Uuid,
+    },
 }
 
 async fn send_chat(
@@ -523,19 +558,17 @@ async fn send_chat(
 
         tx.commit().await.map_err(|_| AppError::Internal)?;
 
-        router_addr.do_send(RouteChat {
-            chat_item: ChatItem {
-                id: data.id,
-                created_at: data.created_at,
-                sender_id,
-                receiver_id: Some(request.receiver_id),
-                sender_key: request.sender_key,
-                receiver_key: request.receiver_key,
-                content: ChatContent::Text {
-                    cipher: request.message_cipher,
-                },
+        router_addr.do_send(RouteChat::NewChat(ChatItem {
+            id: data.id,
+            created_at: data.created_at,
+            sender_id,
+            receiver_id: Some(request.receiver_id),
+            sender_key: request.sender_key,
+            receiver_key: request.receiver_key,
+            content: ChatContent::Text {
+                cipher: request.message_cipher,
             },
-        });
+        }));
 
         Ok(ActionResult::success())
     })
@@ -607,8 +640,17 @@ impl Handler<RouteChat> for WsConnection {
     type Result = ();
 
     fn handle(&mut self, msg: RouteChat, ctx: &mut Self::Context) -> Self::Result {
-        let data = WsReponseMessage::ReceiveChat {
-            chat: msg.chat_item,
+        let data = match msg {
+            RouteChat::NewChat(ch) => WsReponseMessage::ReceiveChat { chat: ch },
+            RouteChat::FileUploaded {
+                sender_id,
+                receiver_id,
+                chat_id,
+            } => WsReponseMessage::ChatFileUploaded {
+                sender_id,
+                receiver_id,
+                chat_id,
+            },
         };
         let json = serde_json::to_string(&data).unwrap();
 
@@ -682,8 +724,13 @@ struct Disconnect {
 
 #[derive(Message, Clone)]
 #[rtype(result = "()")]
-struct RouteChat {
-    chat_item: ChatItem,
+enum RouteChat {
+    NewChat(ChatItem),
+    FileUploaded {
+        sender_id: Uuid,
+        receiver_id: Option<Uuid>,
+        chat_id: Uuid,
+    },
 }
 
 pub struct ChatRouter {
@@ -722,10 +769,26 @@ impl Handler<RouteChat> for ChatRouter {
     type Result = ();
 
     fn handle(&mut self, msg: RouteChat, _: &mut Self::Context) -> Self::Result {
-        if let Some(addr) = self.sessions.get(&msg.chat_item.sender_id) {
+        let sender = match &msg {
+            RouteChat::NewChat(ch) => ch.sender_id,
+            RouteChat::FileUploaded {
+                sender_id,
+                receiver_id,
+                chat_id,
+            } => *sender_id,
+        };
+        if let Some(addr) = self.sessions.get(&sender) {
             addr.do_send(msg.clone());
         }
-        if let Some(receiver_id) = msg.chat_item.receiver_id {
+        let receiver = match &msg {
+            RouteChat::NewChat(ch) => ch.receiver_id,
+            RouteChat::FileUploaded {
+                sender_id,
+                receiver_id,
+                chat_id,
+            } => *receiver_id,
+        };
+        if let Some(receiver_id) = receiver {
             if let Some(addr) = self.sessions.get(&receiver_id) {
                 addr.do_send(msg);
             }

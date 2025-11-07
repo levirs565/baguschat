@@ -34,9 +34,7 @@ const srpClient = createSRPClient(
   {
     bytesLength: 64,
     hash(data) {
-      return Promise.resolve(
-        typedArrayToBuffer(blake2b(new Uint8Array(data)))
-      );
+      return Promise.resolve(typedArrayToBuffer(blake2b(new Uint8Array(data))));
     },
   },
   2048
@@ -568,13 +566,22 @@ interface SendChatRequest {
   message_cipher: string;
 }
 
+export interface ChatFileUplaoded {
+  sender_id: string;
+  receiver_id?: string;
+  chat_id: string;
+}
+
 type WsRequest = { type: "SendChat" } & SendChatRequest;
-type WsReponseMessage = { type: "ReceiveChat"; chat: ChatItem };
+type WsReponseMessage =
+  | { type: "ReceiveChat"; chat: ChatItem }
+  | ({ type: "ChatFileUploaded" } & ChatFileUplaoded);
 
 export type DecryptedChat2 = Awaited<ReturnType<CryptoService["decryptChat2"]>>;
 
 interface ChatWsEventMap {
   "receive-chat": CustomEvent<DecryptedChat2>;
+  "chat-file-uploaded": CustomEvent<ChatFileUplaoded>;
 }
 
 export class ChatWs extends TypedEventTarget<ChatWsEventMap> {
@@ -604,13 +611,20 @@ export class ChatWs extends TypedEventTarget<ChatWsEventMap> {
     const message = e.data;
     if (typeof message == "string") {
       try {
-        const { type, ...rest } = JSON.parse(message) as WsReponseMessage;
-        if (type == "ReceiveChat") {
-          const chat = await this.#cryptoservice.decryptChat2(rest.chat);
+        const msg = JSON.parse(message) as WsReponseMessage;
+        if (msg.type == "ReceiveChat") {
+          const chat = await this.#cryptoservice.decryptChat2(msg.chat);
           this.dispatchTypedEvent(
             "receive-chat",
             new CustomEvent("receive-chat", {
               detail: chat,
+            })
+          );
+        } else if (msg.type == "ChatFileUploaded") {
+          this.dispatchTypedEvent(
+            "chat-file-uploaded",
+            new CustomEvent("chat-file-uploaded", {
+              detail: msg,
             })
           );
         }

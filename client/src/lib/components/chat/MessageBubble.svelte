@@ -21,28 +21,21 @@
 
   let isDownloadFile = $state(false);
 
-  let imgSrc = $state("");
+  async function getImage() {
+    if (message.type != "File") return null;
+    if (message.file_type != "Image") return null;
+    if (!message.uploaed) return null;
 
-  let decryptedImage: Uint8Array | null = null;
-
-  onMount(() => {
-    if (imgSrc) {
-      URL.revokeObjectURL(imgSrc);
-    }
-
-    if (message.type != "File") return;
-    if (message.file_type != "Image") return;
     const store = $sessionStore;
     const msg = message;
-    (async () => {
-      const buffer = await store!.downloadChatFile(msg.id, msg.key);
-      const blob = new Blob([new Uint8Array(buffer)]);
-      decryptedImage = buffer;
-      const blobUrl = URL.createObjectURL(blob);
+    const buffer = await store!.downloadChatFile(msg.id, msg.key);
+    const blob = new Blob([new Uint8Array(buffer)]);
+    const blobUrl = URL.createObjectURL(blob);
 
-      imgSrc = blobUrl;
-    })();
-  });
+    return { blobUrl, buffer };
+  }
+
+  let image = $derived(getImage());
 
   async function downloadFile() {
     if (message.type == "Text") return;
@@ -67,19 +60,20 @@
     isDownloadFile = false;
   }
 
-  function checkSecretMessage() {
+  async function checkSecretMessage() {
     if (message.type == "Text") {
       readSecretChatMessage.set(message.message);
       isReadSecretChatModalOpen.set(true);
       return;
     }
 
-    if (!decryptedImage) {
+    const decrypted = await image;
+    if (!decrypted?.buffer) {
       alert("Pesan belum dimuat");
       return;
     }
 
-    const secretMessage = extractEOFMessage(decryptedImage);
+    const secretMessage = extractEOFMessage(decrypted.buffer);
     if (secretMessage == null) {
       alert("Tidak Ada Pesan Rahasia");
     } else {
@@ -108,9 +102,11 @@
         </div>
         <p class="text-center text-sm">{message.size}, {message.filename}</p>
       {:else}
-        <img src={imgSrc} class="max-w-64 max-h-64 mb-2" />
+        {#await image then img}
+          <img src={img?.blobUrl} class="max-w-64 max-h-64 mb-2" />
+        {/await}
       {/if}
-      <p class="text-center">
+      <p class="text-center dark:text-white mb-2">
         {#if message.uploaed}
           <Button
             color="dark"
@@ -131,7 +127,10 @@
       </p>
     {/if}
 
-    <div class="flex flex-row items-center gap-2" class:flex-row-reverse={isMe}>
+    <div
+      class="flex flex-row items-center gap-2 justify-between"
+      class:flex-row-reverse={isMe}
+    >
       <p
         class="text-xs mt-1 text-right"
         class:text-gray-200={isMe}

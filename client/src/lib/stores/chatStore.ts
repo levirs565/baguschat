@@ -1,4 +1,9 @@
-import type { ChatWs, DecryptedChat2, DecryptedChatPartner } from "$lib/api";
+import type {
+  ChatFileUplaoded,
+  ChatWs,
+  DecryptedChat2,
+  DecryptedChatPartner,
+} from "$lib/api";
 import { writable, derived, get } from "svelte/store";
 import { currentUserId, sessionStore } from "./sessionStore";
 
@@ -62,6 +67,20 @@ const onReceiveChat = (event: CustomEvent<DecryptedChat2>) => {
   });
 };
 
+const onChatFileUploaded = (event: CustomEvent<ChatFileUplaoded>) => {
+  activeMessages.update((value) =>
+    value.map((message) => {
+      if (message.type == "Text") return message;
+      if (message.id != event.detail.chat_id) return message;
+
+      return {
+        ...message,
+        uploaed: true,
+      };
+    })
+  );
+};
+
 sessionStore.subscribe(async (session) => {
   chatWsStore.update((chat) => {
     if (chat) {
@@ -81,6 +100,7 @@ sessionStore.subscribe(async (session) => {
 
   const chatWs = await session.createChatWs();
   chatWs.addEventListener("receive-chat", onReceiveChat);
+  chatWs.addEventListener("chat-file-uploaded", onChatFileUploaded);
   chatWsStore.set(chatWs);
 });
 
