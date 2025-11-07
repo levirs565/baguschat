@@ -15,6 +15,8 @@
   import { ImageOutline } from "flowbite-svelte-icons";
   import Compressor from "@uppy/compressor";
   import { addEOFMessage } from "$lib/stegano";
+  import SecretMessageModal from "../modals/SecretMessageModal.svelte";
+  import { isSecretChatModalOpen } from "$lib/stores/uiStore";
 
   let messageText = "";
 
@@ -197,6 +199,7 @@
   on:submit={handleSend}
 >
   <FilleDetailModal {uppy} />
+  <SecretMessageModal />
 
   <div class="flex items-center space-x-2">
     <input type="file" class="hidden" bind:this={fileInput} />
@@ -218,6 +221,14 @@
       color="alternative"
       class="mr-2 p-2"
       onclick={() => imageInput.click()}
+    >
+      <ImageOutline class="w-6 h-6" />
+    </Button>
+
+    <Button
+      color="alternative"
+      class="mr-2 p-2"
+      onclick={() => isSecretChatModalOpen.set(true)}
     >
       <ImageOutline class="w-6 h-6" />
     </Button>
