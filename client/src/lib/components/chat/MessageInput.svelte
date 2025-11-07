@@ -1,20 +1,28 @@
 <script lang="ts">
-  import { Textarea, Button } from "flowbite-svelte";
+  import { Textarea, Button, P } from "flowbite-svelte";
   import PaperClipOutline from "flowbite-svelte-icons/PaperClipOutline.svelte";
   import CameraPhotoOutline from "flowbite-svelte-icons/CameraPhotoOutline.svelte";
   import PaperPlaneOutline from "flowbite-svelte-icons/PaperPlaneOutline.svelte";
   import { activeContactId, chatWsStore } from "$lib/stores/chatStore";
+  import Uppy, { type UppyFile } from "@uppy/core";
+  import { onDestroy, onMount } from "svelte";
+  import FilleDetailModal from "../modals/FilleDetailModal.svelte";
+  import AwsS3, { type AwsS3UploadParameters } from "@uppy/aws-s3";
+  import { sessionStore } from "$lib/stores/sessionStore";
+  import type { CryptoService } from "$lib/api";
+  import { toBase64 } from "@smithy/util-base64";
+  import { encryptXcacha20 } from "$lib/crypto";
 
   let messageText = "";
 
   function handleSend() {
     if (!messageText.trim()) return;
 
-	let id = $activeContactId
-	let chatWs = $chatWsStore
-	if (!id || !chatWs) return;
+    let id = $activeContactId;
+    let chatWs = $chatWsStore;
+    if (!id || !chatWs) return;
     chatWs.sendText(id, messageText);
-	messageText = ""
+    messageText = "";
   }
   function handleKeydown(event: KeyboardEvent) {
     if (event.key === "Enter" && !event.shiftKey) {
@@ -22,11 +30,124 @@
       handleSend();
     }
   }
+
+  let fileInput: HTMLInputElement;
+
+  type FileMeta = Awaited<ReturnType<CryptoService["prepareFileKey"]>>;
+  const uppy = new Uppy({
+    autoProceed: false,
+  });
+
+  function onFileRemoved() {
+    fileInput.value = "";
+  }
+
+  async function onFileUploaded(file: UppyFile<any, any>) {
+    const chat_id = file.meta.chat_id;
+    await $sessionStore?.apiService.finishFileChatUpload({
+      id: chat_id,
+    });
+  }
+
+  onMount(() => {
+    uppy.addPreProcessor(async (fileIds, uploadIds) => {
+      for await (const fileId of fileIds) {
+        const file = uppy.getFile(fileId);
+        const meta = file.meta as any as FileMeta;
+        if (!(file.data instanceof Blob || file.data instanceof File))
+          throw new Error("Unsupported");
+        const bytes = new Uint8Array(await file.data.arrayBuffer());
+        const encrypted = encryptXcacha20(meta.plain_key, bytes);
+        const blob = new Blob([encrypted]);
+
+        uppy.setFileState(fileId, {
+          type: file.type,
+          name: file.name,
+          data: blob,
+          size: blob.size,
+        });
+      }
+    });
+    uppy.use(AwsS3, {
+      limit: 1,
+      shouldUseMultipart(file) {
+        return false;
+      },
+      endpoint: "",
+      async getUploadParameters(file, options): Promise<AwsS3UploadParameters> {
+        const meta = file.meta as any as FileMeta;
+        const parameters = await $sessionStore?.apiService.startFileChatUpload({
+          file_type: "File",
+          receiver_key: meta.receiver_key,
+          sender_key: meta.sender_key,
+          filename: file.name,
+          receiver_id: $activeContactId!,
+          mime_type: file.type,
+          enrypted_size: file.size ?? 0,
+          size: (file.meta as any).fileSize,
+        });
+
+        uppy.setFileMeta(file.id, {
+          chat_id: parameters!.id,
+        });
+
+        return {
+          url: parameters!.presign_url,
+          method: "PUT",
+          headers: {
+            "content-type": file.type,
+          },
+        };
+      },
+    });
+
+    fileInput.addEventListener("change", (event) => {
+      const files = Array.from((event.target as HTMLInputElement).files ?? []);
+
+      files.forEach((file) => {
+        try {
+          uppy.addFile({
+            source: "file input",
+            name: file.name,
+            type: file.type,
+            data: file,
+          });
+        } catch (err: any) {
+          if (err.isRestriction) {
+            console.log("Restriction error:", err);
+          } else {
+            console.error(err);
+          }
+        }
+      });
+    });
+
+    uppy.on("file-removed", onFileRemoved);
+    uppy.on("upload-success", onFileUploaded as any);
+    uppy.on("complete", onFileRemoved);
+  });
+
+  onDestroy(() => {
+    uppy.off("file-removed", onFileRemoved);
+    uppy.off("upload-success", onFileUploaded as any);
+    uppy.off("complete", onFileRemoved);
+  });
 </script>
 
-<form class="p-4 bg-white dark:bg-gray-800 border-t dark:border-gray-700" on:submit={handleSend}>
+<form
+  class="p-4 bg-white dark:bg-gray-800 border-t dark:border-gray-700"
+  class:hidden={!$activeContactId}
+  on:submit={handleSend}
+>
+  <FilleDetailModal {uppy} />
+
   <div class="flex items-center space-x-2">
-    <Button color="alternative" class="mr-2 p-2">
+    <input type="file" class="hidden" bind:this={fileInput} />
+    <Button
+      color="alternative"
+      class="mr-2 p-2"
+      onclick={() => fileInput.click()}
+    >
       <PaperClipOutline class="w-6 h-6" />
     </Button>
 
@@ -42,7 +163,7 @@
         class="w-full resize-none pr-14"
       />
 
-      <Button type="submit" class="absolute right-2.5 bottom-2 p-2" >
+      <Button type="submit" class="absolute right-2.5 bottom-2 p-2">
         <PaperPlaneOutline class="w-5 h-5 rotate-z-90" />
       </Button>
     </div>

@@ -7,6 +7,7 @@ use actix_web::cookie::Key;
 use actix_web::middleware::ErrorHandlers;
 use actix_web::web::JsonConfig;
 use actix_web::{web, App, HttpServer};
+use aws_sdk_s3::Config;
 use sqlx::postgres::PgPoolOptions;
 
 use crate::chat::ChatRouter;
@@ -26,6 +27,7 @@ async fn main() -> std::io::Result<()> {
     let url = env::var("DATABASE_URL").expect("DATABASE_URL is not set");
     let redis_url = env::var("REDIS_URL").expect("REDIS_URL is not set");
     let session_key = env::var("SESSION_KEY").expect("SESSION_KEY is not set");
+    let s3_bucket = env::var("S3_BUCKET").expect("S3_BUCKET is not set");
 
     println!("Connecting to database..");
     let pool = PgPoolOptions::new()
@@ -34,10 +36,21 @@ async fn main() -> std::io::Result<()> {
         .await
         .expect("Connect to database failed");
 
-    let app_data = web::Data::new(AppState { db_pool: pool });
-
     println!("Connecting to Redis");
     let redis_store = RedisSessionStore::new(redis_url).await.unwrap();
+
+    println!("Connecting to S3");
+    let s3_config = aws_config::load_from_env().await;
+    let s3_config: Config = (&s3_config).into();
+    let s3_config = (&s3_config).to_builder().force_path_style(true).build();
+    let s3_client = aws_sdk_s3::Client::from_conf(s3_config);
+
+
+    let app_data = web::Data::new(AppState {
+        db_pool: pool,
+        s3: s3_client,
+        s3_bucket: s3_bucket,
+    });
 
     println!("Starting server...");
 

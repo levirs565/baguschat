@@ -8,6 +8,8 @@ pub type DBPool = Pool<Postgres>;
 
 pub struct AppState {
     pub db_pool: DBPool,
+    pub s3: aws_sdk_s3::Client,
+    pub s3_bucket: String
 }
 
 

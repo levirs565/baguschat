@@ -1,3 +1,6 @@
+import { xchacha20poly1305 } from "@noble/ciphers/chacha.js"
+import { randomBytes } from "@noble/ciphers/utils.js"
+
 export function typedArrayToBuffer(array: Uint8Array): ArrayBuffer {
   return array.buffer.slice(
     array.byteOffset,
@@ -162,6 +165,27 @@ export async function exportRSAPrivateKey(key: CryptoKey) {
 
 export async function exportRSAPublicKey(key: CryptoKey) {
   return crypto.subtle.exportKey("spki", key);
+}
+
+export function generateXcacha20Key() {
+  return randomBytes(32);
+}
+
+export function encryptXcacha20(key: Uint8Array<ArrayBufferLike>, buffer: Uint8Array<ArrayBufferLike>) {
+  const nonce = randomBytes(24);
+  const cacha = xchacha20poly1305(key, nonce);
+  const encrypted = cacha.encrypt(buffer);
+  const result = new Uint8Array(nonce.byteLength + encrypted.byteLength);
+  result.set(nonce, 0);
+  result.set(encrypted, nonce.length);
+  return result
+}
+
+export function decryptXcacha20(key: Uint8Array<ArrayBufferLike>, buffer: Uint8Array<ArrayBufferLike>) {
+  const nonce = buffer.subarray(0, 24);
+  const cipher = buffer.subarray(24);
+   const cacha = xchacha20poly1305(key, nonce);
+   return cacha.decrypt(cipher);
 }
 
 (globalThis as any).Crypto = {

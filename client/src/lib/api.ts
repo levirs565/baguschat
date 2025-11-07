@@ -23,6 +23,7 @@ import {
   decryptRSA,
   importAESGCMKey,
   decryptAESGCM,
+  generateXcacha20Key,
 } from "./crypto";
 import { getUserPrivateKey, putUserPrivateKey } from "./db";
 import { TypedEventTarget } from "typescript-event-target";
@@ -98,12 +99,35 @@ export type ChatItem = {
       mime_type: string;
       size: number;
       path: string;
+      uploaded: boolean;
     }
 );
 
 export interface ChatPartners {
   id: string;
   last_chat: ChatItem;
+}
+
+export type FileChatType = "File" | "Image";
+
+export interface FileStartUploadRequest {
+  receiver_id: string;
+  sender_key: string;
+  receiver_key: string;
+  file_type: FileChatType;
+  filename: string;
+  mime_type: string;
+  size: number;
+  enrypted_size: number;
+}
+
+export interface FileStartUploadResponse {
+  id: string;
+  presign_url: string;
+}
+
+export interface FileChatFinishRequest {
+  id: string;
 }
 
 export class APIService {
@@ -186,6 +210,14 @@ export class APIService {
 
   getChatPartners() {
     return this.get<ChatPartners[]>(`/chat/partners`);
+  }
+
+  startFileChatUpload(data: FileStartUploadRequest) {
+    return this.post<FileStartUploadResponse>(`/chat/file-chat/start`, data);
+  }
+
+  finishFileChatUpload(data: FileChatFinishRequest) {
+    return this.post(`/chat/file-chat/finish`, data);
   }
 }
 
@@ -299,8 +331,8 @@ export class ClientService {
 }
 
 export class ClientSession {
-  #cryptoService: CryptoService;
-  #apiService: APIService;
+  cryptoService: CryptoService;
+  apiService: APIService;
 
   userId: string;
 
@@ -311,8 +343,8 @@ export class ClientSession {
     publickey: CryptoKey
   ) {
     this.userId = userid;
-    this.#apiService = apiService;
-    this.#cryptoService = new CryptoService(
+    this.apiService = apiService;
+    this.cryptoService = new CryptoService(
       apiService,
       userid,
       privateKey,
@@ -321,35 +353,35 @@ export class ClientSession {
   }
 
   async getState() {
-    return this.#apiService.getState();
+    return this.apiService.getState();
   }
 
   async logout() {
-    return this.#apiService.logout();
+    return this.apiService.logout();
   }
 
   async getChats(userid: string) {
     return Promise.all(
-      (await this.#apiService.getChats(userid)).map(
-        this.#cryptoService.decryptChat2.bind(this.#cryptoService)
+      (await this.apiService.getChats(userid)).map(
+        this.cryptoService.decryptChat2.bind(this.cryptoService)
       )
     );
   }
 
   async getUser(id: string) {
-    return this.#apiService.getUser(id);
+    return this.apiService.getUser(id);
   }
 
   async listUsers(username: string) {
-    return this.#apiService.listUser(username);
+    return this.apiService.listUser(username);
   }
 
   async getChatPartners() {
     return Promise.all(
-      (await this.#apiService.getChatPartners()).map(
+      (await this.apiService.getChatPartners()).map(
         async ({ last_chat, ...other }) => ({
           ...other,
-          last_chat: await this.#cryptoService.decryptChat2(last_chat),
+          last_chat: await this.cryptoService.decryptChat2(last_chat),
         })
       )
     );
@@ -357,7 +389,7 @@ export class ClientSession {
 
   async createChatWs(): Promise<ChatWs> {
     return new Promise((resolve, reject) => {
-      const ws = new WebSocket(`${this.#apiService.baseUrl}/chat/ws`);
+      const ws = new WebSocket(`${this.apiService.baseUrl}/chat/ws`);
 
       const errorListener = () => {
         ws.removeEventListener("error", errorListener);
@@ -367,7 +399,7 @@ export class ClientSession {
       ws.addEventListener("error", errorListener);
 
       ws.addEventListener("open", () => {
-        resolve(new ChatWs(ws, this.#cryptoService));
+        resolve(new ChatWs(ws, this.cryptoService));
       });
     });
   }
@@ -428,6 +460,21 @@ export class CryptoService {
 
   async encrypt(userId: string, buffer: BufferSource) {
     return encryptRSA(await this.getPublicKey(userId), buffer);
+  }
+
+  async prepareFileKey(receiverId: string) {
+    const key = generateXcacha20Key();
+    return {
+      plain_key: key,
+      receiver_key: toBase64(
+        new Uint8Array(await this.encrypt(receiverId, new Uint8Array(key)))
+      ),
+      sender_key: toBase64(
+        new Uint8Array(
+          await this.encrypt(this.#currentUserId, new Uint8Array(key))
+        )
+      ),
+    };
   }
 
   async getChatData(receiverId: string, message: string) {

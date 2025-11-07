@@ -4,8 +4,9 @@ use std::time::{Duration, Instant};
 
 use actix::prelude::*;
 use actix::Actor;
-use actix_web::{get, rt, web, Error, HttpRequest, HttpResponse, Scope};
+use actix_web::{get, post, rt, web, Error, HttpRequest, HttpResponse, Scope};
 use actix_web_actors::ws::{self, WebsocketContext};
+use aws_sdk_s3::presigning::PresigningConfig;
 use futures_util::{StreamExt as _, TryFutureExt};
 use serde::{Deserialize, Serialize};
 use sqlx::prelude::FromRow;
@@ -16,7 +17,7 @@ use crate::auth::{get_userid, guard_auth};
 use crate::core::{ActionResult, AppError, AppResponse, AppState, DBPool};
 use crate::utils::base64_field;
 
-#[derive(sqlx::Type, Debug)]
+#[derive(sqlx::Type, Debug, PartialEq, Eq)]
 #[sqlx(type_name = "conversation_type", rename_all = "lowercase")]
 pub enum ConversationType {
     Text,
@@ -24,7 +25,7 @@ pub enum ConversationType {
     Image,
 }
 
-#[derive(Serialize, Clone, Copy)]
+#[derive(Serialize, Deserialize, Clone, Copy)]
 enum FileChatType {
     File,
     Image,
@@ -43,6 +44,7 @@ enum ChatContent {
         mime_type: String,
         size: i64,
         path: String,
+        uploaded: bool,
     },
 }
 
@@ -89,11 +91,12 @@ async fn get(
                 contet_type as "contet_type: ConversationType",
                 cipher as "cipher?",
                 filename as "filename?", mime_type as "mime_type?", 
-                size as "size?", path as "path?"
+                size as "size?", path as "path?",
+                uploaded as "uploaded?"
             FROM 
                 PChats
             LEFT JOIN conversations_text ON conversations_text.id = PChats.id
-            LEFT JOIN conversations_image ON conversations_image.id = PChats.id
+            LEFT JOIN conversations_file ON conversations_file.id = PChats.id
             WHERE (sender_id = $1 OR receiver_id = $1) AND other_user_id = $2
             ORDER BY created_at
             "#,
@@ -124,11 +127,173 @@ async fn get(
                     mime_type: raw.mime_type.clone().unwrap(),
                     size: raw.size.unwrap(),
                     path: raw.path.clone().unwrap(),
+                    uploaded: raw.uploaded.unwrap(),
                 },
             },
         });
 
         Ok(result.collect())
+    })
+    .await
+}
+
+#[derive(Deserialize)]
+struct FileStartUploadRequest {
+    receiver_id: Uuid,
+    #[serde(with = "base64_field")]
+    sender_key: Vec<u8>,
+    #[serde(with = "base64_field")]
+    receiver_key: Vec<u8>,
+    file_type: FileChatType,
+    filename: String,
+    mime_type: String,
+    size: i64,
+    enrypted_size: i64,
+}
+
+#[derive(Serialize)]
+struct FileStartUploadResponse {
+    id: Uuid,
+    presign_url: String,
+}
+
+const FILE_SIZE_LIMIT: i64 = 1024 * 1024 * 10;
+
+#[post("file-chat/start")]
+async fn file_chat_start(
+    app_data: web::Data<AppState>,
+    request: web::Json<FileStartUploadRequest>,
+    session: actix_session::Session,
+) -> AppResponse<FileStartUploadResponse> {
+    AppResponse::wrap_async(|| async {
+        guard_auth(&session, true)?;
+
+        if request.size > FILE_SIZE_LIMIT || request.enrypted_size > FILE_SIZE_LIMIT {
+            return Err(AppError::BadRequest {
+                message: "File too big".to_string(),
+            });
+        }
+
+        let sender_id = get_userid(&session).unwrap();
+
+        let mut tx = app_data
+            .db_pool
+            .begin()
+            .await
+            .map_err(|_| AppError::Internal)?;
+
+        let chat_type = match request.file_type {
+            FileChatType::File => ConversationType::File,
+            FileChatType::Image => ConversationType::Image,
+        };
+        let data = sqlx::query!(
+            r#"INSERT INTO conversations(
+                sender_id,
+                receiver_id,
+                sender_key,
+                receiver_key,
+                contet_type
+            ) VALUES (
+                $1, $2, $3, $4, $5
+            ) RETURNING id, created_At"#,
+            sender_id,
+            request.receiver_id,
+            request.sender_key,
+            request.receiver_key,
+            chat_type as ConversationType
+        )
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(|_| AppError::Internal)
+        .unwrap();
+
+        let path = format!("{}/{}/{}", sender_id, data.id, request.filename);
+
+        sqlx::query!(
+            r#"INSERT INTO conversations_file(
+                id,
+                filename,
+                mime_type,
+                size,
+                path
+            ) VALUES (
+                $1, $2, $3, $4, $5
+            )"#,
+            data.id,
+            request.filename,
+            request.mime_type,
+            request.size,
+            path
+        )
+        .execute(&mut *tx)
+        .await
+        .map_err(|_| AppError::Internal)?;
+
+        tx.commit().await.map_err(|_| AppError::Internal)?;
+
+        let output = app_data
+            .s3
+            .put_object()
+            .bucket(app_data.s3_bucket.clone())
+            .key(path)
+            .content_length(request.enrypted_size)
+            .presigned(PresigningConfig::expires_in(Duration::from_mins(30)).unwrap())
+            .await
+            .map_err(|_| AppError::Internal)?;
+
+        Ok(FileStartUploadResponse {
+            id: data.id,
+            presign_url: output.uri().to_string(),
+        })
+    })
+    .await
+}
+
+#[derive(Deserialize)]
+struct FileChatFinishRequest {
+    id: Uuid,
+}
+
+#[post("file-chat/finish")]
+async fn file_chat_finish(
+    app_data: web::Data<AppState>,
+    session: actix_session::Session,
+    request: web::Json<FileChatFinishRequest>,
+) -> AppResponse<ActionResult> {
+    AppResponse::wrap_async(|| async {
+        guard_auth(&session, true)?;
+
+        let user_id = get_userid(&session).unwrap();
+
+        let data = sqlx::query!(
+            r#"SELECT 
+                sender_id, contet_type as "contet_type: ConversationType" 
+            FROM conversations WHERE id = $1"#,
+            request.id
+        )
+        .fetch_one(&app_data.db_pool)
+        .await
+        .map_err(|_| AppError::NotFound)?;
+
+        if data.contet_type == ConversationType::Text {
+            return Err(AppError::BadRequest {
+                message: "Invalid chat type".to_string(),
+            });
+        }
+
+        if user_id != data.sender_id {
+            return Err(AppError::Forbidden);
+        }
+
+        sqlx::query!(
+            "UPDATE conversations_file SET uploaded = TRUE WHERE id = $1",
+            request.id
+        )
+        .execute(&app_data.db_pool)
+        .await
+        .map_err(|_| AppError::Internal)?;
+
+        Ok(ActionResult::success())
     })
     .await
 }
@@ -176,11 +341,12 @@ async fn get_partners(
                 contet_type as "contet_type: ConversationType",
                 cipher as "cipher?",
                 filename as "filename?", mime_type as "mime_type?", 
-                size as "size?", path as "path?"
+                size as "size?", path as "path?",
+                uploaded as "uploaded?"
             FROM 
                 RankedChats
             LEFT JOIN conversations_text ON conversations_text.id = RankedChats.id
-            LEFT JOIN conversations_image ON conversations_image.id = RankedChats.id
+            LEFT JOIN conversations_file ON conversations_file.id = RankedChats.id
             WHERE RankedChats.rank = 1
             ORDER BY created_at DESC
             "#,
@@ -212,6 +378,7 @@ async fn get_partners(
                         mime_type: raw.mime_type.clone().unwrap(),
                         size: raw.size.unwrap(),
                         path: raw.path.clone().unwrap(),
+                        uploaded: raw.uploaded.unwrap(),
                     },
                 },
             },
@@ -522,6 +689,8 @@ async fn ws(
 pub fn scope() -> Scope {
     web::scope("/chat")
         .service(get_partners)
+        .service(file_chat_start)
+        .service(file_chat_finish)
         .route("ws", web::get().to(ws))
         .service(get)
 }
