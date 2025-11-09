@@ -24,6 +24,7 @@ async fn main() -> std::io::Result<()> {
         eprintln!("Warning: fail to load .env: {e:?}")
     }
 
+    let port = env::var("PORT").unwrap_or(String::from("8080"));
     let url = env::var("DATABASE_URL").expect("DATABASE_URL is not set");
     let redis_url = env::var("REDIS_URL").expect("REDIS_URL is not set");
     let session_key = env::var("SESSION_KEY").expect("SESSION_KEY is not set");
@@ -91,7 +92,7 @@ async fn main() -> std::io::Result<()> {
             .service(crate::user::scope())
             .service(crate::chat::scope())
     })
-    .bind(("127.0.0.1", 8080))?
+    .bind(("127.0.0.1", port.parse().unwrap()))?
     .run()
     .await
 }

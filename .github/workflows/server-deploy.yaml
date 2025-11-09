@@ -1,0 +1,39 @@
+name: Server Deploy
+
+# run workflow when the condition is met
+on:
+  push:
+    branches: [ "deploy" ]
+  pull_request:
+    branches: [ "deploy" ]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./server
+    steps:
+    - uses: actions/checkout@v3
+    - name: Build
+      env:
+        DATABASE_URL: ${{secrets.DATABASE_URL}}
+      run: cargo build --release
+    - name: make dir
+      run: mkdir app
+    - name: copy
+      run: mv ./target/release/backend ./app/backend
+    - name: Install Heroku CLI # <- IMPORTANT!!! Make sure the cli is installed before using the action
+      run: |
+        curl https://cli-assets.heroku.com/install.sh | sh 
+    - uses: akhileshns/heroku-deploy@v3.14.15
+      with:
+        heroku_api_key: ${{secrets.HEROKU_API_KEY}}
+        heroku_app_name: ${{secrets.HEROKU_APP_NAME}}
+        heroku_email: "${{secrets.HEROKU_EMAIL}}
+        appdir: "./server/app"
+        procfile: "web: ./backend"
+        buildpack: "https://github.com/ph3nx/heroku-binary-buildpack.git"
