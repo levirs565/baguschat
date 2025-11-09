@@ -84,6 +84,7 @@ async fn main() -> std::io::Result<()> {
             .wrap(
                 SessionMiddleware::builder(redis_store.clone(), Key::from(session_key.as_bytes()))
                     .cookie_secure(true)
+                    .cookie_same_site(actix_web::cookie::SameSite::None)
                     .build(),
             )
             .app_data(app_data.clone())
