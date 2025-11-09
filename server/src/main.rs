@@ -92,7 +92,7 @@ async fn main() -> std::io::Result<()> {
             .service(crate::user::scope())
             .service(crate::chat::scope())
     })
-    .bind(("127.0.0.1", port.parse().unwrap()))?
+    .bind(("0.0.0.0", port.parse().unwrap()))?
     .run()
     .await
 }
